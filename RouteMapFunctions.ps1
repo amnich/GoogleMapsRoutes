@@ -37,7 +37,7 @@ function Get-AddressComponentValue {
 
     $Matches = @($Components) | Where-Object {
         $_ -and $_.PSObject.Properties.Name -contains 'types' -and
-        (@($_.types) | Where-Object { $_ -in $Types }).Count -gt 0
+        (@($_.types) | Where-Object { $_ -in $Types } | Select-Object -First 1)
     } | Select-Object -First 1
 
     if (-not $Matches) { return $null }
@@ -143,11 +143,12 @@ function Get-CarRouteData {
         Write-Verbose "Routes API: ($OriginLat,$OriginLng) -> ($DestLat,$DestLng)"
         $Response = Invoke-RestMethod -Uri $RoutesUrl -Method POST -Headers $Headers `
             -Body ($RequestBody | ConvertTo-Json -Depth 10) -TimeoutSec 60
-        if (-not $Response.routes -or $Response.routes.Count -eq 0) {
+        $Routes = @($Response.routes)
+        if ($Routes.Count -eq 0) {
             Write-Warning "Routes API nie zwrocilo tras."
             return [PSCustomObject]@{ OdlegloscKm = $null; CzasMin = $null; EncodedPolyline = $null; Status = 'NO_ROUTES' }
         }
-        $Route = $Response.routes[0]
+        $Route = $Routes[0]
         $DistanceKm = if ($Route.distanceMeters) { [math]::Round($Route.distanceMeters / 1000.0, 2) } else { $null }
         $DurationMinutes = $null
         if ($Route.duration) {
