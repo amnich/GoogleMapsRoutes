@@ -66,8 +66,9 @@ function Get-AddressCoordinates {
     try {
         Write-Verbose "Geokodowanie: '$Address'"
         $Response = Invoke-RestMethod -Uri $Url -Method GET -TimeoutSec 30
-        if ($Response.status -eq 'OK' -and $Response.results.Count -gt 0) {
-            $ResultItem = $Response.results[0]
+        $Results = @($Response.results)
+        if ($Response.status -eq 'OK' -and $Results.Count -gt 0) {
+            $ResultItem = $Results[0]
             $Location   = $ResultItem.geometry.location
 
             $Components   = @($ResultItem.address_components)
