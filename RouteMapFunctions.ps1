@@ -28,6 +28,32 @@ function Select-InputExcel {
     return $null
 }
 
+function Get-AddressComponentValue {
+    [CmdletBinding()]
+    param(
+        [Parameter()][object[]]$Components,
+        [Parameter(Mandatory)][string[]]$Types
+    )
+
+    $Matches = @($Components) | Where-Object {
+        $_ -and $_.PSObject.Properties.Name -contains 'types' -and
+        (@($_.types) | Where-Object { $_ -in $Types }).Count -gt 0
+    } | Select-Object -First 1
+
+    if (-not $Matches) { return $null }
+
+    foreach ($FieldName in @('long_name', 'short_name', 'name')) {
+        if ($Matches.PSObject.Properties.Name -contains $FieldName) {
+            $Value = [string]$Matches.$FieldName
+            if (-not [string]::IsNullOrWhiteSpace($Value)) {
+                return $Value
+            }
+        }
+    }
+
+    return $null
+}
+
 function Get-AddressCoordinates {
     [CmdletBinding()]
     param(
@@ -45,12 +71,12 @@ function Get-AddressCoordinates {
             $Location   = $ResultItem.geometry.location
 
             $Components   = @($ResultItem.address_components)
-            $StreetNumber = ($Components | Where-Object { $_.types -contains 'street_number' } | Select-Object -First 1).long_name
-            $Route        = ($Components | Where-Object { $_.types -contains 'route' } | Select-Object -First 1).long_name
-            $PostalCode   = ($Components | Where-Object { $_.types -contains 'postal_code' } | Select-Object -First 1).long_name
-            $City         = ($Components | Where-Object { $_.types -contains 'locality' -or $_.types -contains 'postal_town' } | Select-Object -First 1).long_name
-            if (-not $City) {
-                $City = ($Components | Where-Object { $_.types -contains 'administrative_area_level_3' -or $_.types -contains 'administrative_area_level_2' } | Select-Object -First 1).long_name
+            $StreetNumber = Get-AddressComponentValue -Components $Components -Types @('street_number')
+            $Route        = Get-AddressComponentValue -Components $Components -Types @('route')
+            $PostalCode   = Get-AddressComponentValue -Components $Components -Types @('postal_code')
+            $City         = Get-AddressComponentValue -Components $Components -Types @('locality', 'postal_town')
+            if ([string]::IsNullOrWhiteSpace($City)) {
+                $City = Get-AddressComponentValue -Components $Components -Types @('administrative_area_level_3', 'administrative_area_level_2')
             }
 
             $StreetWithNumber = if ($Route -and $StreetNumber) { "$Route $StreetNumber" }
@@ -79,10 +105,11 @@ function Get-AddressCoordinates {
         }
     }
     catch {
-        Write-Error "Bład geokodowania '$Address': $($_.Exception.Message)"
+        $Message = $_.Exception.Message
+        Write-Warning "Błąd geokodowania '$Address': $Message"
         return [PSCustomObject]@{
             Latitude = $null; Longitude = $null; FormattedAddress = $null
-            UlicaINumer = $null; KodPocztowy = $null; Miasto = $null; Status = "EXCEPTION: $($_.Exception.Message)"
+            UlicaINumer = $null; KodPocztowy = $null; Miasto = $null; Status = "EXCEPTION: $Message"
         }
     }
 }
