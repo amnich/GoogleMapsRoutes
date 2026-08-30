@@ -130,7 +130,7 @@ function Get-CarRouteData {
         destination              = @{ location = @{ latLng = @{ latitude = $DestLat; longitude = $DestLng } } }
         travelMode               = 'DRIVE'
         routingPreference        = 'TRAFFIC_UNAWARE'
-        computeAlternativeRoutes = $false
+        computeAlternativeRoutes = $true
         languageCode             = 'pl'
         units                    = 'METRIC'
     }
@@ -148,7 +148,8 @@ function Get-CarRouteData {
             Write-Warning "Routes API nie zwrocilo tras."
             return [PSCustomObject]@{ OdlegloscKm = $null; CzasMin = $null; EncodedPolyline = $null; Status = 'NO_ROUTES' }
         }
-        $Route = $Routes[0]
+        # Google optymalizuje trasy pod czas, nie dystans - wybieramy najkrotsza w km sposrod zwroconych alternatyw
+        $Route = $Routes | Sort-Object -Property distanceMeters | Select-Object -First 1
         $DistanceKm = if ($Route.distanceMeters) { [math]::Round($Route.distanceMeters / 1000.0, 2) } else { $null }
         $DurationMinutes = $null
         if ($Route.duration) {
