@@ -58,7 +58,8 @@ function Get-AddressCoordinates {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Address,
-        [Parameter(Mandatory)][string]$ApiKey
+        [Parameter(Mandatory)][string]$ApiKey,
+        [Parameter()][switch]$RequireStreetNumber
     )
     if ([string]::IsNullOrWhiteSpace($Address)) { return $null }
     $EncodedAddress = [System.Uri]::EscapeDataString($Address.Trim())
@@ -86,6 +87,14 @@ function Get-AddressCoordinates {
                                 else { $null }
 
             $FormattedAddress = $ResultItem.formatted_address -replace ',\s*Poland$', ', Polska' -replace '\bPoland\b', 'Polska'
+            $ResultTypes = @($ResultItem.types)
+            $IsPartialMatch = $ResultItem.PSObject.Properties.Name -contains 'partial_match' -and $ResultItem.partial_match -eq $true
+            $MatchStatus = if ($RequireStreetNumber -and [string]::IsNullOrWhiteSpace($StreetNumber)) {
+                'IMPRECISE_MATCH'
+            }
+            else {
+                'OK'
+            }
 
             return [PSCustomObject]@{
                 Latitude         = [double]$Location.lat
@@ -94,14 +103,17 @@ function Get-AddressCoordinates {
                 UlicaINumer      = $StreetWithNumber
                 KodPocztowy      = $PostalCode
                 Miasto           = $City
-                Status           = 'OK'
+                MatchType        = $ResultTypes -join ','
+                PartialMatch     = $IsPartialMatch
+                Status           = $MatchStatus
             }
         }
         else {
             Write-Warning "Geokodowanie nieudane dla '$Address'. Status API: $($Response.status)"
             return [PSCustomObject]@{
                 Latitude = $null; Longitude = $null; FormattedAddress = $null
-                UlicaINumer = $null; KodPocztowy = $null; Miasto = $null; Status = $Response.status
+                UlicaINumer = $null; KodPocztowy = $null; Miasto = $null
+                MatchType = $null; PartialMatch = $null; Status = $Response.status
             }
         }
     }
@@ -110,7 +122,8 @@ function Get-AddressCoordinates {
         Write-Warning "Błąd geokodowania '$Address': $Message"
         return [PSCustomObject]@{
             Latitude = $null; Longitude = $null; FormattedAddress = $null
-            UlicaINumer = $null; KodPocztowy = $null; Miasto = $null; Status = "EXCEPTION: $Message"
+            UlicaINumer = $null; KodPocztowy = $null; Miasto = $null
+            MatchType = $null; PartialMatch = $null; Status = "EXCEPTION: $Message"
         }
     }
 }
@@ -122,6 +135,7 @@ function Get-CarRouteData {
         [Parameter(Mandatory)][double]$OriginLng,
         [Parameter(Mandatory)][double]$DestLat,
         [Parameter(Mandatory)][double]$DestLng,
+        [Parameter()][object[]]$IntermediatePoints = @(),
         [Parameter(Mandatory)][string]$ApiKey
     )
     $RoutesUrl = 'https://routes.googleapis.com/directions/v2:computeRoutes'
@@ -130,9 +144,21 @@ function Get-CarRouteData {
         destination              = @{ location = @{ latLng = @{ latitude = $DestLat; longitude = $DestLng } } }
         travelMode               = 'DRIVE'
         routingPreference        = 'TRAFFIC_UNAWARE'
-        computeAlternativeRoutes = $true
+        computeAlternativeRoutes = @($IntermediatePoints).Count -eq 0
         languageCode             = 'pl'
         units                    = 'METRIC'
+    }
+    if (@($IntermediatePoints).Count -gt 0) {
+        $RequestBody.intermediates = @($IntermediatePoints | ForEach-Object {
+                @{
+                    location = @{
+                        latLng = @{
+                            latitude  = [double]$_.Latitude
+                            longitude = [double]$_.Longitude
+                        }
+                    }
+                }
+            })
     }
     $Headers = @{
         'X-Goog-Api-Key'   = $ApiKey
@@ -173,6 +199,7 @@ function Save-RouteMapPng {
         [Parameter(Mandatory)][double]$OriginLng,
         [Parameter(Mandatory)][double]$DestLat,
         [Parameter(Mandatory)][double]$DestLng,
+        [Parameter()][object[]]$RoutePoints = @(),
         [Parameter(Mandatory)][string]$OutputPath,
         [Parameter(Mandatory)][string]$ApiKey,
         [Parameter()][int]$Width = 900,
@@ -183,13 +210,26 @@ function Save-RouteMapPng {
         [Parameter()][string]$TekstOdleglosc = ''
     )
     $EncodedForUrl = [System.Uri]::EscapeDataString($EncodedPolyline)
-    $MarkerStart = [System.Uri]::EscapeDataString("color:green|label:A|$OriginLat,$OriginLng")
-    $MarkerEnd = [System.Uri]::EscapeDataString("color:red|label:B|$DestLat,$DestLng")
+    $MarkerParameters = if (@($RoutePoints).Count -gt 0) {
+        $PointCount = @($RoutePoints).Count
+        for ($PointIndex = 0; $PointIndex -lt $PointCount; $PointIndex++) {
+            $Point = $RoutePoints[$PointIndex]
+            $MarkerColor = if ($PointIndex -eq 0) { 'green' } elseif ($PointIndex -eq ($PointCount - 1)) { 'red' } else { 'blue' }
+            $MarkerNumber = $PointIndex + 1
+            $MarkerLabel = if ($MarkerNumber -le 9) { [string]$MarkerNumber } else { [char](55 + $MarkerNumber) }
+            $MarkerValue = [System.Uri]::EscapeDataString("color:$MarkerColor|label:$MarkerLabel|$($Point.Latitude),$($Point.Longitude)")
+            "&markers=$MarkerValue"
+        }
+    }
+    else {
+        $MarkerStart = [System.Uri]::EscapeDataString("color:green|label:A|$OriginLat,$OriginLng")
+        $MarkerEnd = [System.Uri]::EscapeDataString("color:red|label:B|$DestLat,$DestLng")
+        @("&markers=$MarkerStart", "&markers=$MarkerEnd")
+    }
     $StaticMapUrl = ("https://maps.googleapis.com/maps/api/staticmap" +
         "?size=${Width}x${Height}" +
         "&path=weight:4|color:0x0066FFff|enc:$EncodedForUrl" +
-        "&markers=$MarkerStart" +
-        "&markers=$MarkerEnd" +
+        ($MarkerParameters -join '') +
         "&key=$ApiKey")
     try {
         Write-Verbose "Pobieranie mapy PNG: $OutputPath"

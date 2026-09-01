@@ -146,11 +146,15 @@ foreach ($Row in $Dane) {
         AdresA_UlicaINumer  = $null
         AdresA_KodPocztowy  = $null
         AdresA_Miasto       = $null
+        AdresA_TypDopasowania = $null
+        AdresA_CzescioweDopasowanie = $null
         AdresB              = $AdresB
         AdresB_Geokodowany  = $null
         AdresB_UlicaINumer  = $null
         AdresB_KodPocztowy  = $null
         AdresB_Miasto       = $null
+        AdresB_TypDopasowania = $null
+        AdresB_CzescioweDopasowanie = $null
         OdlegloscKm         = $null
         CzasPodrozyMin      = $null
         PlikMapy            = $null
@@ -169,30 +173,34 @@ foreach ($Row in $Dane) {
     }
 
     # Geokodowanie A
-    $GeoA = Get-AddressCoordinates -Address $AdresA -ApiKey $ApiKey
+    $GeoA = Get-AddressCoordinates -Address $AdresA -ApiKey $ApiKey -RequireStreetNumber
     $Wynik.StatusGeokodowaniaA = $GeoA.Status
     $Wynik.AdresA_Geokodowany  = $GeoA.FormattedAddress
     $Wynik.AdresA_UlicaINumer  = $GeoA.UlicaINumer
     $Wynik.AdresA_KodPocztowy  = $GeoA.KodPocztowy
     $Wynik.AdresA_Miasto       = $GeoA.Miasto
+    $Wynik.AdresA_TypDopasowania = $GeoA.MatchType
+    $Wynik.AdresA_CzescioweDopasowanie = $GeoA.PartialMatch
     if ($GeoA.Status -ne 'OK') {
         $Wynik.StatusTrasy = 'BLAD_GEOCODING_A'
-        $Wynik.BladOpis = "Nie mozna znalezc adresu A: $($GeoA.Status)"
-        Write-Warning "  Blad geokodowania A: $($GeoA.Status)"
+        $Wynik.BladOpis = "Nieprecyzyjny lub nieznany adres A: $($GeoA.Status); wynik: $($GeoA.FormattedAddress); typ: $($GeoA.MatchType)"
+        Write-Warning "  Blad geokodowania A: $($Wynik.BladOpis)"
         $Wyniki.Add($Wynik); Start-Sleep -Milliseconds 200; continue
     }
 
     # Geokodowanie B
-    $GeoB = Get-AddressCoordinates -Address $AdresB -ApiKey $ApiKey
+    $GeoB = Get-AddressCoordinates -Address $AdresB -ApiKey $ApiKey -RequireStreetNumber
     $Wynik.StatusGeokodowaniaB = $GeoB.Status
     $Wynik.AdresB_Geokodowany  = $GeoB.FormattedAddress
     $Wynik.AdresB_UlicaINumer  = $GeoB.UlicaINumer
     $Wynik.AdresB_KodPocztowy  = $GeoB.KodPocztowy
     $Wynik.AdresB_Miasto       = $GeoB.Miasto
+    $Wynik.AdresB_TypDopasowania = $GeoB.MatchType
+    $Wynik.AdresB_CzescioweDopasowanie = $GeoB.PartialMatch
     if ($GeoB.Status -ne 'OK') {
         $Wynik.StatusTrasy = 'BLAD_GEOCODING_B'
-        $Wynik.BladOpis = "Nie mozna znalezc adresu B: $($GeoB.Status)"
-        Write-Warning "  Blad geokodowania B: $($GeoB.Status)"
+        $Wynik.BladOpis = "Nieprecyzyjny lub nieznany adres B: $($GeoB.Status); wynik: $($GeoB.FormattedAddress); typ: $($GeoB.MatchType)"
+        Write-Warning "  Blad geokodowania B: $($Wynik.BladOpis)"
         $Wyniki.Add($Wynik); Start-Sleep -Milliseconds 200; continue
     }
 
