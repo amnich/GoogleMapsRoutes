@@ -58,8 +58,7 @@ function Get-AddressCoordinates {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Address,
-        [Parameter(Mandatory)][string]$ApiKey,
-        [Parameter()][switch]$RequireStreetNumber
+        [Parameter(Mandatory)][string]$ApiKey
     )
     if ([string]::IsNullOrWhiteSpace($Address)) { return $null }
     $EncodedAddress = [System.Uri]::EscapeDataString($Address.Trim())
@@ -87,14 +86,6 @@ function Get-AddressCoordinates {
                                 else { $null }
 
             $FormattedAddress = $ResultItem.formatted_address -replace ',\s*Poland$', ', Polska' -replace '\bPoland\b', 'Polska'
-            $ResultTypes = @($ResultItem.types)
-            $IsPartialMatch = $ResultItem.PSObject.Properties.Name -contains 'partial_match' -and $ResultItem.partial_match -eq $true
-            $MatchStatus = if ($RequireStreetNumber -and [string]::IsNullOrWhiteSpace($StreetNumber)) {
-                'IMPRECISE_MATCH'
-            }
-            else {
-                'OK'
-            }
 
             return [PSCustomObject]@{
                 Latitude         = [double]$Location.lat
@@ -103,17 +94,14 @@ function Get-AddressCoordinates {
                 UlicaINumer      = $StreetWithNumber
                 KodPocztowy      = $PostalCode
                 Miasto           = $City
-                MatchType        = $ResultTypes -join ','
-                PartialMatch     = $IsPartialMatch
-                Status           = $MatchStatus
+                Status           = 'OK'
             }
         }
         else {
             Write-Warning "Geokodowanie nieudane dla '$Address'. Status API: $($Response.status)"
             return [PSCustomObject]@{
                 Latitude = $null; Longitude = $null; FormattedAddress = $null
-                UlicaINumer = $null; KodPocztowy = $null; Miasto = $null
-                MatchType = $null; PartialMatch = $null; Status = $Response.status
+                UlicaINumer = $null; KodPocztowy = $null; Miasto = $null; Status = $Response.status
             }
         }
     }
@@ -122,8 +110,7 @@ function Get-AddressCoordinates {
         Write-Warning "Błąd geokodowania '$Address': $Message"
         return [PSCustomObject]@{
             Latitude = $null; Longitude = $null; FormattedAddress = $null
-            UlicaINumer = $null; KodPocztowy = $null; Miasto = $null
-            MatchType = $null; PartialMatch = $null; Status = "EXCEPTION: $Message"
+            UlicaINumer = $null; KodPocztowy = $null; Miasto = $null; Status = "EXCEPTION: $Message"
         }
     }
 }
@@ -135,7 +122,6 @@ function Get-CarRouteData {
         [Parameter(Mandatory)][double]$OriginLng,
         [Parameter(Mandatory)][double]$DestLat,
         [Parameter(Mandatory)][double]$DestLng,
-        [Parameter()][object[]]$IntermediatePoints = @(),
         [Parameter(Mandatory)][string]$ApiKey
     )
     $RoutesUrl = 'https://routes.googleapis.com/directions/v2:computeRoutes'
@@ -144,21 +130,9 @@ function Get-CarRouteData {
         destination              = @{ location = @{ latLng = @{ latitude = $DestLat; longitude = $DestLng } } }
         travelMode               = 'DRIVE'
         routingPreference        = 'TRAFFIC_UNAWARE'
-        computeAlternativeRoutes = @($IntermediatePoints).Count -eq 0
+        computeAlternativeRoutes = $true
         languageCode             = 'pl'
         units                    = 'METRIC'
-    }
-    if (@($IntermediatePoints).Count -gt 0) {
-        $RequestBody.intermediates = @($IntermediatePoints | ForEach-Object {
-                @{
-                    location = @{
-                        latLng = @{
-                            latitude  = [double]$_.Latitude
-                            longitude = [double]$_.Longitude
-                        }
-                    }
-                }
-            })
     }
     $Headers = @{
         'X-Goog-Api-Key'   = $ApiKey
@@ -199,7 +173,6 @@ function Save-RouteMapPng {
         [Parameter(Mandatory)][double]$OriginLng,
         [Parameter(Mandatory)][double]$DestLat,
         [Parameter(Mandatory)][double]$DestLng,
-        [Parameter()][object[]]$RoutePoints = @(),
         [Parameter(Mandatory)][string]$OutputPath,
         [Parameter(Mandatory)][string]$ApiKey,
         [Parameter()][int]$Width = 900,
@@ -207,39 +180,43 @@ function Save-RouteMapPng {
         # Parametry tekstu nakładki (opcjonalne)
         [Parameter()][string]$TekstAdresA = '',
         [Parameter()][string]$TekstAdresB = '',
-        [Parameter()][string]$TekstOdleglosc = ''
+        [Parameter()][string]$TekstOdleglosc = '',
+        [Parameter()][string]$TekstUmowa = '',
+        [Parameter()][string]$TekstKierunek = '',
+        [Parameter()][string]$TekstNaglowekLewy = '',
+        [Parameter()][string]$TekstNaglowekPrawy = ''
     )
     $EncodedForUrl = [System.Uri]::EscapeDataString($EncodedPolyline)
-    $MarkerParameters = if (@($RoutePoints).Count -gt 0) {
-        $PointCount = @($RoutePoints).Count
-        for ($PointIndex = 0; $PointIndex -lt $PointCount; $PointIndex++) {
-            $Point = $RoutePoints[$PointIndex]
-            $MarkerColor = if ($PointIndex -eq 0) { 'green' } elseif ($PointIndex -eq ($PointCount - 1)) { 'red' } else { 'blue' }
-            $MarkerNumber = $PointIndex + 1
-            $MarkerLabel = if ($MarkerNumber -le 9) { [string]$MarkerNumber } else { [char](55 + $MarkerNumber) }
-            $MarkerValue = [System.Uri]::EscapeDataString("color:$MarkerColor|label:$MarkerLabel|$($Point.Latitude),$($Point.Longitude)")
-            "&markers=$MarkerValue"
-        }
-    }
-    else {
-        $MarkerStart = [System.Uri]::EscapeDataString("color:green|label:A|$OriginLat,$OriginLng")
-        $MarkerEnd = [System.Uri]::EscapeDataString("color:red|label:B|$DestLat,$DestLng")
-        @("&markers=$MarkerStart", "&markers=$MarkerEnd")
-    }
+    $MarkerStart = [System.Uri]::EscapeDataString("color:green|label:A|$OriginLat,$OriginLng")
+    $MarkerEnd = [System.Uri]::EscapeDataString("color:red|label:B|$DestLat,$DestLng")
     $StaticMapUrl = ("https://maps.googleapis.com/maps/api/staticmap" +
         "?size=${Width}x${Height}" +
         "&path=weight:4|color:0x0066FFff|enc:$EncodedForUrl" +
-        ($MarkerParameters -join '') +
+        "&markers=$MarkerStart" +
+        "&markers=$MarkerEnd" +
         "&key=$ApiKey")
     try {
         Write-Verbose "Pobieranie mapy PNG: $OutputPath"
         Invoke-WebRequest -Uri $StaticMapUrl -OutFile $OutputPath -TimeoutSec 30 | Out-Null
         Write-Verbose "Mapa pobrana: $OutputPath"
 
+        # Formatowanie nagłówków górnych
+        if (-not [string]::IsNullOrWhiteSpace($TekstUmowa) -and [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
+            $TekstNaglowekLewy = if ($TekstUmowa -match '^(numer\s*umowy|umowa|nr\s*umowy):') { $TekstUmowa } else { "Numer umowy: $TekstUmowa" }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($TekstKierunek) -and [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
+            $TekstNaglowekPrawy = if ($TekstKierunek -match '^(kierunek|trasa):') { $TekstKierunek } else { "Kierunek: $TekstKierunek" }
+        }
+
+        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) -or
+                        (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy))
+
+        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or
+                           (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or
+                           (-not [string]::IsNullOrWhiteSpace($TekstOdleglosc))
+
         # Nakladka tekstowa przez System.Drawing
-        $MaTextOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or
-        (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or
-        (-not [string]::IsNullOrWhiteSpace($TekstOdleglosc))
+        $MaTextOverlay = $MaBottomOverlay -or $MaTopOverlay
 
         if ($MaTextOverlay) {
             try {
@@ -269,10 +246,12 @@ function Save-RouteMapPng {
                 $Graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
 
                 # ── Czcionki ──────────────────────────────────────────────────
-                $FontLabel = [System.Drawing.Font]::new('Segoe UI', 8,  [System.Drawing.FontStyle]::Bold)
-                $FontValue = [System.Drawing.Font]::new('Segoe UI', 9,  [System.Drawing.FontStyle]::Regular)
-                $FontDist  = [System.Drawing.Font]::new('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
-                $FontDate  = [System.Drawing.Font]::new('Segoe UI', 7,  [System.Drawing.FontStyle]::Italic)
+                $FontTopLabel = [System.Drawing.Font]::new('Segoe UI', 9,  [System.Drawing.FontStyle]::Bold)
+                $FontTopValue = [System.Drawing.Font]::new('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+                $FontLabel    = [System.Drawing.Font]::new('Segoe UI', 8,  [System.Drawing.FontStyle]::Bold)
+                $FontValue    = [System.Drawing.Font]::new('Segoe UI', 9,  [System.Drawing.FontStyle]::Regular)
+                $FontDist     = [System.Drawing.Font]::new('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+                $FontDate     = [System.Drawing.Font]::new('Segoe UI', 7,  [System.Drawing.FontStyle]::Italic)
 
                 # ── Kolory ────────────────────────────────────────────────────
                 $BrushWhite   = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
@@ -280,105 +259,166 @@ function Save-RouteMapPng {
                 $BrushGray    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 180, 220, 255))
                 $BrushDateClr = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(200, 180, 190, 210))
 
-                # ── Layout: strefa prawa zarezerwowana dla odległości ─────────
-                $Pad         = 10
-                $LineH       = 18    # wysokość wiersza tekstu adresu
-                $LabelH      = 18    # wysokość etykiety (A/B)
-                $DateH       = 14    # wysokość wiersza daty
-                $PadTop      = 6
-                $PadBot      = 5
-                $RightW      = 110   # szerokość kolumny prawej (odległość + data)
+                # ── Górny pasek (Numer umowy i Kierunek) ──────────────────────
+                if ($MaTopOverlay) {
+                    $TopBannerH = 34
+                    $BrushTopBg = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(215, 12, 17, 32))
+                    $PenTopLine = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(200, 0, 100, 255), 2)
 
-                # Oblicz dostępną szerokość dla tekstu adresu
-                $LabelASize = $Graphics.MeasureString('A: ', $FontLabel)
-                $LabelBSize = $Graphics.MeasureString('B: ', $FontLabel)
-                $LabelMaxW  = [float][math]::Max($LabelASize.Width, $LabelBSize.Width)
-                $TextMaxW   = [float]($Bitmap.Width - $RightW - $LabelMaxW - $Pad * 2)
+                    $Graphics.FillRectangle($BrushTopBg, 0, 0, $Bitmap.Width, $TopBannerH)
+                    $Graphics.DrawLine($PenTopLine, 0, $TopBannerH, $Bitmap.Width, $TopBannerH)
 
-                # ── Word-wrap inline (bez scriptblock — PS5 safe) ────────────
-                # Zamienia dlugi adres na tablice 1 lub 2 linii
-                function Get-WrappedLines {
-                    param(
-                        [System.Drawing.Graphics]$G,
-                        [string]$Text,
-                        [System.Drawing.Font]$F,
-                        [float]$MaxW
-                    )
-                    if ([string]::IsNullOrWhiteSpace($Text)) { return [string[]]@('') }
-                    if ($G.MeasureString($Text, $F).Width -le $MaxW) { return [string[]]@($Text) }
-                    $Words = $Text -split ' '
-                    $L1 = ''; $L2 = ''; $On2 = $false
-                    foreach ($W in $Words) {
-                        if (-not $On2) {
-                            $T = if ($L1) { "$L1 $W" } else { $W }
-                            if ($G.MeasureString($T, $F).Width -le $MaxW) { $L1 = $T }
-                            else { $On2 = $true; $L2 = $W }
-                        } else {
-                            $T2 = if ($L2) { "$L2 $W" } else { $W }
-                            if ($G.MeasureString($T2, $F).Width -le $MaxW) { $L2 = $T2 }
-                            else {
-                                if ($L2.Length -gt 3) { $L2 = $L2.Substring(0, $L2.Length - 3) + '...' }
-                                break
-                            }
+                    $TopTextY = [float](($TopBannerH - $FontTopValue.Height) / 2)
+                    $CurLeftX = [float]10
+
+                    # Lewy nagłówek (np. Numer umowy: ABC)
+                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
+                        if ($TekstNaglowekLewy -match '^([^:]+:\s*)(.*)$') {
+                            $PrefixL     = $Matches[1]
+                            $ValueL      = $Matches[2]
+                            $PrefixLSize = $Graphics.MeasureString($PrefixL, $FontTopLabel)
+                            $Graphics.DrawString($PrefixL, $FontTopLabel, $BrushGray, $CurLeftX, [float]($TopTextY + 0.5))
+                            $CurLeftX   += $PrefixLSize.Width
+                            $Graphics.DrawString($ValueL, $FontTopValue, $BrushWhite, $CurLeftX, $TopTextY)
+                            $CurLeftX   += $Graphics.MeasureString($ValueL, $FontTopValue).Width
+                        }
+                        else {
+                            $Graphics.DrawString($TekstNaglowekLewy, $FontTopValue, $BrushWhite, $CurLeftX, $TopTextY)
+                            $CurLeftX += $Graphics.MeasureString($TekstNaglowekLewy, $FontTopValue).Width
                         }
                     }
-                    if ($L2) { return [string[]]@($L1, $L2) } else { return [string[]]@($L1) }
+
+                    # Prawy nagłówek (np. Kierunek: Praca -> Dom)
+                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
+                        if ($TekstNaglowekPrawy -match '^([^:]+:\s*)(.*)$') {
+                            $PrefixR     = $Matches[1]
+                            $ValueR      = $Matches[2]
+                            $PrefixRSize = $Graphics.MeasureString($PrefixR, $FontTopLabel)
+                            $ValueRSize  = $Graphics.MeasureString($ValueR, $FontTopValue)
+                            $TotalRWidth = $PrefixRSize.Width + $ValueRSize.Width
+                            $RightStartX = [float][math]::Max($CurLeftX + 15, $Bitmap.Width - 10 - $TotalRWidth)
+
+                            $Graphics.DrawString($PrefixR, $FontTopLabel, $BrushGray, $RightStartX, [float]($TopTextY + 0.5))
+                            $Graphics.DrawString($ValueR, $FontTopValue, $BrushYellow, [float]($RightStartX + $PrefixRSize.Width), $TopTextY)
+                        }
+                        else {
+                            $SizeR       = $Graphics.MeasureString($TekstNaglowekPrawy, $FontTopValue)
+                            $RightStartX = [float][math]::Max($CurLeftX + 15, $Bitmap.Width - 10 - $SizeR.Width)
+                            $Graphics.DrawString($TekstNaglowekPrawy, $FontTopValue, $BrushYellow, $RightStartX, $TopTextY)
+                        }
+                    }
+
+                    $PenTopLine.Dispose()
+                    $BrushTopBg.Dispose()
                 }
 
-                $LinesA = @(Get-WrappedLines -G $Graphics -Text $TekstAdresA -F $FontValue -MaxW $TextMaxW)
-                $LinesB = @(Get-WrappedLines -G $Graphics -Text $TekstAdresB -F $FontValue -MaxW $TextMaxW)
+                $PenLine = $null
+                $BrushBg = $null
 
-                # ── Oblicz dynamiczną wysokość paska ──────────────────────────
-                $RowsA  = $LinesA.Count
-                $RowsB  = $LinesB.Count
-                $ContentH   = $PadTop + $LabelH + (($RowsA - 1) * $LineH) + 4 +
-                              $LabelH + (($RowsB - 1) * $LineH) + $DateH + $PadBot
-                $BannerHeight = [int][math]::Max(88, $ContentH)
-                $BannerY      = $Bitmap.Height - $BannerHeight
+                # ── Dolny pasek (Adresy, odległość i data) ────────────────────
+                if ($MaBottomOverlay) {
+                    # ── Layout: strefa prawa zarezerwowana dla odległości ─────────
+                    $Pad         = 10
+                    $LineH       = 18    # wysokość wiersza tekstu adresu
+                    $LabelH      = 18    # wysokość etykiety (A/B)
+                    $DateH       = 14    # wysokość wiersza daty
+                    $PadTop      = 6
+                    $PadBot      = 5
+                    $RightW      = 110   # szerokość kolumny prawej (odległość + data)
 
-                # ── Tło paska ─────────────────────────────────────────────────
-                $BrushBg = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(210, 12, 17, 32))
-                $Graphics.FillRectangle($BrushBg, 0, $BannerY, $Bitmap.Width, $BannerHeight)
+                    # Oblicz dostępną szerokość dla tekstu adresu
+                    $LabelASize = $Graphics.MeasureString('A: ', $FontLabel)
+                    $LabelBSize = $Graphics.MeasureString('B: ', $FontLabel)
+                    $LabelMaxW  = [float][math]::Max($LabelASize.Width, $LabelBSize.Width)
+                    $TextMaxW   = [float]($Bitmap.Width - $RightW - $LabelMaxW - $Pad * 2)
 
-                $PenLine = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(200, 0, 100, 255), 2)
-                $Graphics.DrawLine($PenLine, 0, $BannerY, $Bitmap.Width, $BannerY)
+                    # ── Word-wrap inline (bez scriptblock — PS5 safe) ────────────
+                    # Zamienia dlugi adres na tablice 1 lub 2 linii
+                    function Get-WrappedLines {
+                        param(
+                            [System.Drawing.Graphics]$G,
+                            [string]$Text,
+                            [System.Drawing.Font]$F,
+                            [float]$MaxW
+                        )
+                        if ([string]::IsNullOrWhiteSpace($Text)) { return [string[]]@('') }
+                        if ($G.MeasureString($Text, $F).Width -le $MaxW) { return [string[]]@($Text) }
+                        $Words = $Text -split ' '
+                        $L1 = ''; $L2 = ''; $On2 = $false
+                        foreach ($W in $Words) {
+                            if (-not $On2) {
+                                $T = if ($L1) { "$L1 $W" } else { $W }
+                                if ($G.MeasureString($T, $F).Width -le $MaxW) { $L1 = $T }
+                                else { $On2 = $true; $L2 = $W }
+                            } else {
+                                $T2 = if ($L2) { "$L2 $W" } else { $W }
+                                if ($G.MeasureString($T2, $F).Width -le $MaxW) { $L2 = $T2 }
+                                else {
+                                    if ($L2.Length -gt 3) { $L2 = $L2.Substring(0, $L2.Length - 3) + '...' }
+                                    break
+                                }
+                            }
+                        }
+                        if ($L2) { return [string[]]@($L1, $L2) } else { return [string[]]@($L1) }
+                    }
 
-                # ── Rysuj A ───────────────────────────────────────────────────
-                $CurY = [float]($BannerY + $PadTop)
-                $Graphics.DrawString('A: ', $FontLabel, $BrushGray, [float]$Pad, $CurY)
-                $LabelXOffset = [float]($Pad + $LabelMaxW)
-                foreach ($Line in $LinesA) {
-                    $Graphics.DrawString($Line, $FontValue, $BrushWhite, $LabelXOffset, $CurY)
-                    $CurY += [float]$LineH
+                    $LinesA = @(Get-WrappedLines -G $Graphics -Text $TekstAdresA -F $FontValue -MaxW $TextMaxW)
+                    $LinesB = @(Get-WrappedLines -G $Graphics -Text $TekstAdresB -F $FontValue -MaxW $TextMaxW)
+
+                    # ── Oblicz dynamiczną wysokość paska ──────────────────────────
+                    $RowsA  = $LinesA.Count
+                    $RowsB  = $LinesB.Count
+                    $ContentH   = $PadTop + $LabelH + (($RowsA - 1) * $LineH) + 4 +
+                                  $LabelH + (($RowsB - 1) * $LineH) + $DateH + $PadBot
+                    $BannerHeight = [int][math]::Max(88, $ContentH)
+                    $BannerY      = $Bitmap.Height - $BannerHeight
+
+                    # ── Tło paska ─────────────────────────────────────────────────
+                    $BrushBg = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(210, 12, 17, 32))
+                    $Graphics.FillRectangle($BrushBg, 0, $BannerY, $Bitmap.Width, $BannerHeight)
+
+                    $PenLine = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(200, 0, 100, 255), 2)
+                    $Graphics.DrawLine($PenLine, 0, $BannerY, $Bitmap.Width, $BannerY)
+
+                    # ── Rysuj A ───────────────────────────────────────────────────
+                    $CurY = [float]($BannerY + $PadTop)
+                    $Graphics.DrawString('A: ', $FontLabel, $BrushGray, [float]$Pad, $CurY)
+                    $LabelXOffset = [float]($Pad + $LabelMaxW)
+                    foreach ($Line in $LinesA) {
+                        $Graphics.DrawString($Line, $FontValue, $BrushWhite, $LabelXOffset, $CurY)
+                        $CurY += [float]$LineH
+                    }
+
+                    # ── Rysuj B ───────────────────────────────────────────────────
+                    $CurY += 4.0
+                    $Graphics.DrawString('B: ', $FontLabel, $BrushGray, [float]$Pad, $CurY)
+                    foreach ($Line in $LinesB) {
+                        $Graphics.DrawString($Line, $FontValue, $BrushWhite, $LabelXOffset, $CurY)
+                        $CurY += [float]$LineH
+                    }
+
+                    # ── Odległość (prawa strona, wyśrodkowana pionowo) ────────────
+                    if (-not [string]::IsNullOrWhiteSpace($TekstOdleglosc)) {
+                        $DistSizeF  = $Graphics.MeasureString($TekstOdleglosc, $FontDist)
+                        $DistX      = [float]($Bitmap.Width - $DistSizeF.Width - $Pad)
+                        $DistY      = [float]($BannerY + ($BannerHeight - $DateH - $PadBot - $DistSizeF.Height) / 2)
+                        $Graphics.DrawString($TekstOdleglosc, $FontDist, $BrushYellow, $DistX, $DistY)
+                    }
+
+                    # ── Data generacji (prawa strona, sam dół paska) ──────────────
+                    $DateStr     = Get-Date -Format 'yyyy-MM-dd  HH:mm'
+                    $DateSizeF   = $Graphics.MeasureString($DateStr, $FontDate)
+                    $DateX       = [float]($Bitmap.Width - $DateSizeF.Width - $Pad)
+                    $DateY       = [float]($Bitmap.Height - $PadBot - $DateSizeF.Height)
+                    $Graphics.DrawString($DateStr, $FontDate, $BrushDateClr, $DateX, $DateY)
                 }
-
-                # ── Rysuj B ───────────────────────────────────────────────────
-                $CurY += 4.0
-                $Graphics.DrawString('B: ', $FontLabel, $BrushGray, [float]$Pad, $CurY)
-                foreach ($Line in $LinesB) {
-                    $Graphics.DrawString($Line, $FontValue, $BrushWhite, $LabelXOffset, $CurY)
-                    $CurY += [float]$LineH
-                }
-
-                # ── Odległość (prawa strona, wyśrodkowana pionowo) ────────────
-                if (-not [string]::IsNullOrWhiteSpace($TekstOdleglosc)) {
-                    $DistSizeF  = $Graphics.MeasureString($TekstOdleglosc, $FontDist)
-                    $DistX      = [float]($Bitmap.Width - $DistSizeF.Width - $Pad)
-                    $DistY      = [float]($BannerY + ($BannerHeight - $DateH - $PadBot - $DistSizeF.Height) / 2)
-                    $Graphics.DrawString($TekstOdleglosc, $FontDist, $BrushYellow, $DistX, $DistY)
-                }
-
-                # ── Data generacji (prawa strona, sam dół paska) ──────────────
-                $DateStr     = Get-Date -Format 'yyyy-MM-dd  HH:mm'
-                $DateSizeF   = $Graphics.MeasureString($DateStr, $FontDate)
-                $DateX       = [float]($Bitmap.Width - $DateSizeF.Width - $Pad)
-                $DateY       = [float]($Bitmap.Height - $PadBot - $DateSizeF.Height)
-                $Graphics.DrawString($DateStr, $FontDate, $BrushDateClr, $DateX, $DateY)
 
                 # ── Zwolnij zasoby GDI+ ───────────────────────────────────────
-                $PenLine.Dispose()
-                $BrushBg.Dispose(); $BrushWhite.Dispose(); $BrushYellow.Dispose()
+                if ($PenLine) { $PenLine.Dispose() }
+                if ($BrushBg) { $BrushBg.Dispose() }
+                $BrushWhite.Dispose(); $BrushYellow.Dispose()
                 $BrushGray.Dispose(); $BrushDateClr.Dispose()
+                $FontTopLabel.Dispose(); $FontTopValue.Dispose()
                 $FontLabel.Dispose(); $FontValue.Dispose(); $FontDist.Dispose(); $FontDate.Dispose()
                 $Graphics.Dispose()
 
@@ -403,3 +443,4 @@ function Save-RouteMapPng {
         return $false
     }
 }
+

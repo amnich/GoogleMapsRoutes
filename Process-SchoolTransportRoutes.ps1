@@ -110,7 +110,8 @@ function Invoke-RouteAndMap {
         [Parameter(Mandatory)][string]$LabelEnd,
         [Parameter(Mandatory)][string]$ApiKey,
         [Parameter()][int]$Width = 900,
-        [Parameter()][int]$Height = 600
+        [Parameter()][int]$Height = 600,
+        [Parameter()][string]$NumerUmowy = ''
     )
 
     $Trasa = Get-CarRouteData -OriginLat $GeoStart.Latitude -OriginLng $GeoStart.Longitude `
@@ -128,12 +129,14 @@ function Invoke-RouteAndMap {
         $OdlTekst = if ($Trasa.OdlegloscKm) { "$($Trasa.OdlegloscKm) km" } else { '' }
         $TekstA = if ($GeoStart.FormattedAddress) { $GeoStart.FormattedAddress } else { $LabelStart }
         $TekstB = if ($GeoEnd.FormattedAddress) { $GeoEnd.FormattedAddress } else { $LabelEnd }
+        $KierunekTekst = "$LabelStart -> $LabelEnd"
 
         $MapSaved = Save-RouteMapPng -EncodedPolyline $Trasa.EncodedPolyline `
             -OriginLat $GeoStart.Latitude -OriginLng $GeoStart.Longitude `
             -DestLat $GeoEnd.Latitude -DestLng $GeoEnd.Longitude `
             -OutputPath $PngPath -ApiKey $ApiKey -Width $Width -Height $Height `
-            -TekstAdresA $TekstA -TekstAdresB $TekstB -TekstOdleglosc $OdlTekst
+            -TekstAdresA $TekstA -TekstAdresB $TekstB -TekstOdleglosc $OdlTekst `
+            -TekstUmowa $NumerUmowy -TekstKierunek $KierunekTekst
 
         if ($MapSaved) {
             Write-Host "    Mapa: $(Split-Path -Leaf $PngPath)" -ForegroundColor Cyan
@@ -384,7 +387,7 @@ foreach ($Row in $Dane) {
     $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
     $Result = Invoke-RouteAndMap -GeoStart $GeoDom -GeoEnd $GeoSzkola `
         -PngPath $PngPath -LabelStart 'Dom' -LabelEnd 'Szkoła' `
-        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight
+        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
     $KmDomSzkola = $Result.OdlegloscKm
     Start-Sleep -Milliseconds 250
 
@@ -393,7 +396,7 @@ foreach ($Row in $Dane) {
     $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
     $Result = Invoke-RouteAndMap -GeoStart $GeoSzkola -GeoEnd $GeoDom `
         -PngPath $PngPath -LabelStart 'Szkoła' -LabelEnd 'Dom' `
-        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight
+        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
     $KmSzkolaDom = $Result.OdlegloscKm
     Start-Sleep -Milliseconds 250
 
@@ -404,7 +407,7 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoDom -GeoEnd $GeoPraca `
             -PngPath $PngPath -LabelStart 'Dom' -LabelEnd 'Praca' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
         $KmDomPraca = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
@@ -413,7 +416,7 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoPraca -GeoEnd $GeoDom `
             -PngPath $PngPath -LabelStart 'Praca' -LabelEnd 'Dom' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
         $KmPracaDom = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
@@ -422,7 +425,7 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoSzkola -GeoEnd $GeoPraca `
             -PngPath $PngPath -LabelStart 'Szkoła' -LabelEnd 'Praca' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
         $KmSzkolaPraca = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
@@ -431,7 +434,7 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoPraca -GeoEnd $GeoSzkola `
             -PngPath $PngPath -LabelStart 'Praca' -LabelEnd 'Szkoła' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
         $KmPracaSzkola = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
     }
@@ -519,3 +522,4 @@ Write-Host " Folder wynikowy       : $OutputFolder" -ForegroundColor White
 Write-Host "════════════════════════════════════════════════`n" -ForegroundColor Magenta
 
 $WszystkieWyniki
+
