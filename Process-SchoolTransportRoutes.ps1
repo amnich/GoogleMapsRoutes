@@ -111,7 +111,9 @@ function Invoke-RouteAndMap {
         [Parameter(Mandatory)][string]$ApiKey,
         [Parameter()][int]$Width = 900,
         [Parameter()][int]$Height = 600,
-        [Parameter()][string]$NumerUmowy = ''
+        [Parameter()][string]$NumerUmowy = '',
+        [Parameter()][string]$Opis = '',
+        [Parameter()][string]$DataWygenerowania = ''
     )
 
     $Trasa = Get-CarRouteData -OriginLat $GeoStart.Latitude -OriginLng $GeoStart.Longitude `
@@ -136,7 +138,8 @@ function Invoke-RouteAndMap {
             -DestLat $GeoEnd.Latitude -DestLng $GeoEnd.Longitude `
             -OutputPath $PngPath -ApiKey $ApiKey -Width $Width -Height $Height `
             -TekstAdresA $TekstA -TekstAdresB $TekstB -TekstOdleglosc $OdlTekst `
-            -TekstUmowa $NumerUmowy -TekstKierunek $KierunekTekst
+            -TekstUmowa $NumerUmowy -TekstKierunek $KierunekTekst `
+            -Opis $Opis -DataWygenerowania $DataWygenerowania
 
         if ($MapSaved) {
             Write-Host "    Mapa: $(Split-Path -Leaf $PngPath)" -ForegroundColor Cyan
@@ -199,6 +202,7 @@ function Find-ColumnHeader {
 
 $ColMap = @{
     Umowa   = Find-ColumnHeader -Headers $Headers -Patterns @('(?i)^\s*(umow[ay]|nr\s*umow[ay]|numer\s*umow[ay]|id|numer|nr)\s*$', '(?i)umow')
+    Opis    = Find-ColumnHeader -Headers $Headers -Patterns @('(?i)^\s*(opis|nazwa|nazwa\s*folderu|folder|identyfikator)\s*$', '(?i)opis')
     Szkola  = Find-ColumnHeader -Headers $Headers -Patterns @('(?i)^\s*(szko[łl][ay]|adres\s*szko[łl][yi]|plac[oó]wk[ay]|przedszkol[ea]|o[sś]rodek|szko[łl]a\s*adres)\s*$', '(?i)szko[łl]|plac[oó]wk|przedszkol')
     Dom     = Find-ColumnHeader -Headers $Headers -Patterns @('(?i)^\s*(dom|domu|adres\s*domu|adres\s*zamieszkania|zamieszkani[ea]|miejsce\s*zamieszkania|dom\s*adres)\s*$', '(?i)dom|zamieszkan')
     Praca   = Find-ColumnHeader -Headers $Headers -Patterns @('(?i)^\s*(prac[ay]|adres\s*prac[ay]|miejsce\s*prac[ay]|zak[łl]ad\s*prac[ay]|firma|praca\s*adres)\s*$', '(?i)prac|firm')
@@ -233,6 +237,7 @@ foreach ($Row in $Dane) {
     $RowIndex++
 
     $NumerUmowy = if ($ColMap.Umowa -and $null -ne $Row.($ColMap.Umowa)) { ($Row.($ColMap.Umowa) -as [string]).Trim() } else { $null }
+    $Opis = if ($ColMap.Opis -and $null -ne $Row.($ColMap.Opis)) { ($Row.($ColMap.Opis) -as [string]).Trim() } else { $null }
     $AdresSzkoly = if ($ColMap.Szkola -and $null -ne $Row.($ColMap.Szkola)) { ($Row.($ColMap.Szkola) -as [string]).Trim() } else { $null }
     $AdresDomu = if ($ColMap.Dom -and $null -ne $Row.($ColMap.Dom)) { ($Row.($ColMap.Dom) -as [string]).Trim() } else { $null }
     $AdresPracy = if ($ColMap.Praca -and $null -ne $Row.($ColMap.Praca)) { ($Row.($ColMap.Praca) -as [string]).Trim() } else { $null }
@@ -244,8 +249,10 @@ foreach ($Row in $Dane) {
         continue
     }
 
-    $SafeName = ConvertTo-SafeFileName -Name $NumerUmowy
-    Write-Host "`n[$RowIndex/$TotalRows] Umowa: $NumerUmowy ($SafeName)" -ForegroundColor Yellow
+    $SafeIdentifier = if (-not [string]::IsNullOrWhiteSpace($Opis)) { $Opis } else { $NumerUmowy }
+    $SafeName = ConvertTo-SafeFileName -Name $SafeIdentifier
+    $DisplayLabel = if ($Opis) { "$NumerUmowy ($Opis)" } else { $NumerUmowy }
+    Write-Host "`n[$RowIndex/$TotalRows] Umowa: $DisplayLabel (Folder: $SafeName)" -ForegroundColor Yellow
     Write-Host "  Dom:    $AdresDomu" -ForegroundColor White
     Write-Host "  Szkoła: $AdresSzkoly" -ForegroundColor White
     if (Test-PracaAddress -Praca $AdresPracy) {
@@ -265,6 +272,7 @@ foreach ($Row in $Dane) {
         Write-Warning "  Wiersz ${RowIndex}: Pusty adres Domu lub Szkoły — pomijam."
         $WszystkieWyniki.Add([PSCustomObject]@{
                 'Numer umowy'        = $NumerUmowy
+                'Opis'               = $Opis
                 'Tryb'               = $Tryb
                 'Wariant'            = $Wariant
                 'AdresDomu'          = $AdresDomu
@@ -346,6 +354,7 @@ foreach ($Row in $Dane) {
     if ($HasError) {
         $WszystkieWyniki.Add([PSCustomObject]@{
                 'Numer umowy'        = $NumerUmowy
+                'Opis'               = $Opis
                 'Tryb'               = $Tryb
                 'Wariant'            = $Wariant
                 'AdresDomu'          = $AdresDomu
@@ -382,12 +391,15 @@ foreach ($Row in $Dane) {
     $KmSzkolaPraca = $null
     $KmPracaSzkola = $null
 
+    $curDate = (Get-Date).ToString('yyyy-MM-dd')
+
     # ── Trasa 1: Dom → Szkoła ─────────────────────────────────────────────────
     $PngName = "${SafeName}_Dom_Szkoła.png"
     $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
     $Result = Invoke-RouteAndMap -GeoStart $GeoDom -GeoEnd $GeoSzkola `
         -PngPath $PngPath -LabelStart 'Dom' -LabelEnd 'Szkoła' `
-        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
+        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
+        -NumerUmowy $NumerUmowy -Opis $Opis -DataWygenerowania $curDate
     $KmDomSzkola = $Result.OdlegloscKm
     Start-Sleep -Milliseconds 250
 
@@ -396,7 +408,8 @@ foreach ($Row in $Dane) {
     $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
     $Result = Invoke-RouteAndMap -GeoStart $GeoSzkola -GeoEnd $GeoDom `
         -PngPath $PngPath -LabelStart 'Szkoła' -LabelEnd 'Dom' `
-        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
+        -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
+        -NumerUmowy $NumerUmowy -Opis $Opis -DataWygenerowania $curDate
     $KmSzkolaDom = $Result.OdlegloscKm
     Start-Sleep -Milliseconds 250
 
@@ -407,7 +420,8 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoDom -GeoEnd $GeoPraca `
             -PngPath $PngPath -LabelStart 'Dom' -LabelEnd 'Praca' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
+            -NumerUmowy $NumerUmowy -Opis $Opis -DataWygenerowania $curDate
         $KmDomPraca = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
@@ -416,7 +430,8 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoPraca -GeoEnd $GeoDom `
             -PngPath $PngPath -LabelStart 'Praca' -LabelEnd 'Dom' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
+            -NumerUmowy $NumerUmowy -Opis $Opis -DataWygenerowania $curDate
         $KmPracaDom = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
@@ -425,7 +440,8 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoSzkola -GeoEnd $GeoPraca `
             -PngPath $PngPath -LabelStart 'Szkoła' -LabelEnd 'Praca' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
+            -NumerUmowy $NumerUmowy -Opis $Opis -DataWygenerowania $curDate
         $KmSzkolaPraca = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
@@ -434,7 +450,8 @@ foreach ($Row in $Dane) {
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoPraca -GeoEnd $GeoSzkola `
             -PngPath $PngPath -LabelStart 'Praca' -LabelEnd 'Szkoła' `
-            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight -NumerUmowy $NumerUmowy
+            -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
+            -NumerUmowy $NumerUmowy -Opis $Opis -DataWygenerowania $curDate
         $KmPracaSzkola = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
     }
@@ -442,6 +459,7 @@ foreach ($Row in $Dane) {
     # ── Wynik dla tego wiersza ────────────────────────────────────────────────
     $WierszWynik = [PSCustomObject]@{
         'Numer umowy'        = $NumerUmowy
+        'Opis'               = $Opis
         'Tryb'               = $Tryb
         'Wariant'            = $Wariant
         'AdresDomu'          = $AdresDomu
