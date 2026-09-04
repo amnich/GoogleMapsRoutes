@@ -325,6 +325,22 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
         try {
             # Geokodowanie Startu
             $GeoStart = Get-AddressCoordinates -Address $r.Start -ApiKey $ApiKey
+            $StartStatus = Get-GeocodeStatusDescription -Geo $GeoStart
+            $IsStartFallback = if ($GeoStart -and ($GeoStart.PartialMatch -or $GeoStart.MatchType -in 'APPROXIMATE', 'GEOMETRIC_CENTER')) { $true } else { $false }
+            $RoutePoints = [System.Collections.Generic.List[PSCustomObject]]::new()
+            $RoutePoints.Add([PSCustomObject]@{
+                Order           = 1
+                PointType       = 'Start'
+                OriginalAddress = $r.Start
+                GeocodedAddress = if ($GeoStart) { $GeoStart.FormattedAddress } else { $null }
+                GeocodeStatus   = $StartStatus
+                MatchType       = if ($GeoStart) { $GeoStart.MatchType } else { 'NOT_FOUND' }
+                PartialMatch    = if ($GeoStart) { [bool]$GeoStart.PartialMatch } else { $false }
+                IsFallback      = $IsStartFallback
+                Latitude        = if ($GeoStart) { $GeoStart.Latitude } else { $null }
+                Longitude       = if ($GeoStart) { $GeoStart.Longitude } else { $null }
+            })
+
             if ($GeoStart.Status -ne 'OK') {
                 Write-Warning "  Błąd geokodowania startu: $($r.Start)"
                 $ResultsList.Add([PSCustomObject]@{
@@ -332,8 +348,10 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     Nazwa            = $RouteName
                     Start            = $r.Start
                     StartGeokodowany = $null
+                    StartStatus      = $StartStatus
                     Koniec           = $r.End
                     KoniecGeokodowany= $null
+                    EndStatus        = 'NOT_PROCESSED'
                     LiczbaPrzystankow= 0
                     TypTrasy         = $RowRouteType
                     OdlegloscKm      = $null
@@ -341,21 +359,39 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     MapaPath         = $null
                     GoogleMapsUrl    = $null
                     Status           = "Błąd geokodowania startu: $($GeoStart.Status)"
+                    Points           = @($RoutePoints)
                 })
                 continue
             }
 
             # Geokodowanie Celu
             $GeoEnd = Get-AddressCoordinates -Address $r.End -ApiKey $ApiKey
+            $EndStatus = Get-GeocodeStatusDescription -Geo $GeoEnd
+            $IsEndFallback = if ($GeoEnd -and ($GeoEnd.PartialMatch -or $GeoEnd.MatchType -in 'APPROXIMATE', 'GEOMETRIC_CENTER')) { $true } else { $false }
+
             if ($GeoEnd.Status -ne 'OK') {
                 Write-Warning "  Błąd geokodowania celu: $($r.End)"
+                $RoutePoints.Add([PSCustomObject]@{
+                    Order           = 2
+                    PointType       = 'End'
+                    OriginalAddress = $r.End
+                    GeocodedAddress = if ($GeoEnd) { $GeoEnd.FormattedAddress } else { $null }
+                    GeocodeStatus   = $EndStatus
+                    MatchType       = if ($GeoEnd) { $GeoEnd.MatchType } else { 'NOT_FOUND' }
+                    PartialMatch    = if ($GeoEnd) { [bool]$GeoEnd.PartialMatch } else { $false }
+                    IsFallback      = $IsEndFallback
+                    Latitude        = if ($GeoEnd) { $GeoEnd.Latitude } else { $null }
+                    Longitude       = if ($GeoEnd) { $GeoEnd.Longitude } else { $null }
+                })
                 $ResultsList.Add([PSCustomObject]@{
                     Id               = [string]$CurrentIdx
                     Nazwa            = $RouteName
                     Start            = $r.Start
                     StartGeokodowany = $GeoStart.FormattedAddress
+                    StartStatus      = $StartStatus
                     Koniec           = $r.End
                     KoniecGeokodowany= $null
+                    EndStatus        = $EndStatus
                     LiczbaPrzystankow= 0
                     TypTrasy         = $RowRouteType
                     OdlegloscKm      = $null
@@ -363,25 +399,58 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     MapaPath         = $null
                     GoogleMapsUrl    = $null
                     Status           = "Błąd geokodowania celu: $($GeoEnd.Status)"
+                    Points           = @($RoutePoints)
                 })
                 continue
             }
 
             # Geokodowanie Punktów Pośrednich
             $GeocodedWaypoints = [System.Collections.Generic.List[PSCustomObject]]::new()
+            $WpIdx = 1
             if ($r.Waypoints -and $r.Waypoints.Count -gt 0) {
                 foreach ($wp in $r.Waypoints) {
                     if ([string]::IsNullOrWhiteSpace($wp)) { continue }
                     $g = Get-AddressCoordinates -Address $wp -ApiKey $ApiKey
-                    if ($g.Status -eq 'OK') {
+                    $wpStatus = Get-GeocodeStatusDescription -Geo $g
+                    $isWpFallback = if ($g -and ($g.PartialMatch -or $g.MatchType -in 'APPROXIMATE', 'GEOMETRIC_CENTER')) { $true } else { $false }
+
+                    $RoutePoints.Add([PSCustomObject]@{
+                        Order           = ($WpIdx + 1)
+                        PointType       = "Waypoint $WpIdx"
+                        OriginalAddress = $wp
+                        GeocodedAddress = if ($g) { $g.FormattedAddress } else { $null }
+                        GeocodeStatus   = $wpStatus
+                        MatchType       = if ($g) { $g.MatchType } else { 'NOT_FOUND' }
+                        PartialMatch    = if ($g) { [bool]$g.PartialMatch } else { $false }
+                        IsFallback      = $isWpFallback
+                        Latitude        = if ($g) { $g.Latitude } else { $null }
+                        Longitude       = if ($g) { $g.Longitude } else { $null }
+                    })
+
+                    if ($g.Status -eq 'OK' -and $null -ne $g.Latitude -and $null -ne $g.Longitude) {
                         $GeocodedWaypoints.Add($g)
                     }
                     else {
-                        Write-Warning "  Ostrzeżenie: pomijanie nieznanego punktu pośredniego '$wp'"
+                        Write-Warning "  Ostrzeżenie: pomijanie nieznanego punktu pośredniego '$wp' ($wpStatus)"
                     }
+                    $WpIdx++
                     Start-Sleep -Milliseconds 100
                 }
             }
+
+            # Add End point to structured points
+            $RoutePoints.Add([PSCustomObject]@{
+                Order           = ($RoutePoints.Count + 1)
+                PointType       = 'End'
+                OriginalAddress = $r.End
+                GeocodedAddress = if ($GeoEnd) { $GeoEnd.FormattedAddress } else { $null }
+                GeocodeStatus   = $EndStatus
+                MatchType       = if ($GeoEnd) { $GeoEnd.MatchType } else { 'NOT_FOUND' }
+                PartialMatch    = if ($GeoEnd) { [bool]$GeoEnd.PartialMatch } else { $false }
+                IsFallback      = $IsEndFallback
+                Latitude        = if ($GeoEnd) { $GeoEnd.Latitude } else { $null }
+                Longitude       = if ($GeoEnd) { $GeoEnd.Longitude } else { $null }
+            })
 
             # Obliczenie trasy
             $Trasa = Get-CarRouteData -OriginLat $GeoStart.Latitude -OriginLng $GeoStart.Longitude `
@@ -396,8 +465,10 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     Nazwa            = $RouteName
                     Start            = $r.Start
                     StartGeokodowany = $GeoStart.FormattedAddress
+                    StartStatus      = $StartStatus
                     Koniec           = $r.End
                     KoniecGeokodowany= $GeoEnd.FormattedAddress
+                    EndStatus        = $EndStatus
                     LiczbaPrzystankow= $GeocodedWaypoints.Count
                     TypTrasy         = $RowRouteType
                     OdlegloscKm      = $null
@@ -405,6 +476,7 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     MapaPath         = $null
                     GoogleMapsUrl    = $null
                     Status           = "Błąd trasy: $($Trasa.Status)"
+                    Points           = @($RoutePoints)
                 })
                 continue
             }
@@ -441,8 +513,10 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                 Nazwa            = $RouteName
                 Start            = $r.Start
                 StartGeokodowany = $GeoStart.FormattedAddress
+                StartStatus      = $StartStatus
                 Koniec           = $r.End
                 KoniecGeokodowany= $GeoEnd.FormattedAddress
+                EndStatus        = $EndStatus
                 LiczbaPrzystankow= $GeocodedWaypoints.Count
                 TypTrasy         = $RowRouteType
                 OdlegloscKm      = $Trasa.OdlegloscKm
@@ -450,6 +524,7 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                 MapaPath         = $MapPath
                 GoogleMapsUrl    = $GoogleMapsUrl
                 Status           = 'OK'
+                Points           = @($RoutePoints)
             })
         }
         catch {
@@ -459,8 +534,10 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                 Nazwa            = $RouteName
                 Start            = $r.Start
                 StartGeokodowany = $null
+                StartStatus      = 'EXCEPTION'
                 Koniec           = $r.End
                 KoniecGeokodowany= $null
+                EndStatus        = 'EXCEPTION'
                 LiczbaPrzystankow= 0
                 TypTrasy         = $RowRouteType
                 OdlegloscKm      = $null
@@ -468,6 +545,7 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                 MapaPath         = $null
                 GoogleMapsUrl    = $null
                 Status           = "Błąd: $($_.Exception.Message)"
+                Points           = @($RoutePoints)
             })
         }
 

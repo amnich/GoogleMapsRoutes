@@ -45,8 +45,14 @@ public class DwmDarkWindow {
 
 $script:AppDirName = 'SchoolTransportRoutes'
 $script:LocalConfigFolder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $script:AppDirName
-$script:ConfigFilePath = if (Test-Path "$PSScriptRoot\config.json") {
-    "$PSScriptRoot\config.json"
+$script:ExeDir = try {
+    Split-Path ([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName) -Parent
+} catch { $null }
+
+$script:ConfigFilePath = if ($script:ExeDir -and (Test-Path (Join-Path $script:ExeDir 'config.json'))) {
+    Join-Path $script:ExeDir 'config.json'
+} elseif ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'config.json'))) {
+    Join-Path $PSScriptRoot 'config.json'
 } else {
     Join-Path $script:LocalConfigFolder 'config.json'
 }

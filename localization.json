@@ -146,7 +146,24 @@
         "OverlayPropEndRaw": "End Address (Raw Input)",
         "RouteTypeFastest": "Fastest",
         "RouteTypeShortest": "Shortest",
-        "RouteTypeEco": "Eco"
+        "RouteTypeEco": "Eco",
+        "ThemeToggle": "Theme:",
+        "ThemeDark": "🌙 Dark",
+        "ThemeLight": "☀️ Light",
+        "ThemeToggleTip": "Toggle Light / Dark theme",
+        "SettingsThemeLabel": "Application Theme (Color Scheme):",
+        "BatchTabPoints": "📍 Points Detail",
+        "PointsColRouteId": "Route ID",
+        "PointsColRouteName": "Route Name",
+        "PointsColOrder": "No.",
+        "PointsColType": "Point Type",
+        "PointsColOriginalAddress": "Original Address",
+        "PointsColGeocodedAddress": "Geocoded Address",
+        "PointsColGeocodeStatus": "Geocode Status",
+        "PointsColMatchType": "Match Type",
+        "PointsColIsFallback": "Fallback?",
+        "PointsColLatitude": "Latitude",
+        "PointsColLongitude": "Longitude"
       }
     },
     "de": {
@@ -295,7 +312,24 @@
         "OverlayPropEndRaw": "Zieladresse (Rohdaten)",
         "RouteTypeFastest": "Schnellste",
         "RouteTypeShortest": "Kürzeste",
-        "RouteTypeEco": "Eco"
+        "RouteTypeEco": "Eco",
+        "ThemeToggle": "Design:",
+        "ThemeDark": "🌙 Dunkel",
+        "ThemeLight": "☀️ Hell",
+        "ThemeToggleTip": "Hell- / Dunkelmodus umschalten",
+        "SettingsThemeLabel": "Anwendungs-Design (Farbschema):",
+        "BatchTabPoints": "📍 Routenpunkte",
+        "PointsColRouteId": "Routen-ID",
+        "PointsColRouteName": "Routenname",
+        "PointsColOrder": "Nr.",
+        "PointsColType": "Punkttyp",
+        "PointsColOriginalAddress": "Originaladresse",
+        "PointsColGeocodedAddress": "Geokodierte Adresse",
+        "PointsColGeocodeStatus": "Geokodierungsstatus",
+        "PointsColMatchType": "Übereinstimmungstyp",
+        "PointsColIsFallback": "Fallback?",
+        "PointsColLatitude": "Breitengrad",
+        "PointsColLongitude": "Längengrad"
       }
     },
     "pl": {
@@ -444,7 +478,24 @@
         "OverlayPropEndRaw": "Adres docelowy (Wprowadzony)",
         "RouteTypeFastest": "Najszybsza",
         "RouteTypeShortest": "Najkrótsza",
-        "RouteTypeEco": "Eko"
+        "RouteTypeEco": "Eko",
+        "ThemeToggle": "Motyw:",
+        "ThemeDark": "🌙 Ciemny",
+        "ThemeLight": "☀️ Jasny",
+        "ThemeToggleTip": "Przełącz tryb jasny / ciemny",
+        "SettingsThemeLabel": "Motyw aplikacji (schemat kolorów):",
+        "BatchTabPoints": "📍 Punkty Tras",
+        "PointsColRouteId": "ID Trasy",
+        "PointsColRouteName": "Nazwa Trasy",
+        "PointsColOrder": "Lp.",
+        "PointsColType": "Typ Punktu",
+        "PointsColOriginalAddress": "Adres Oryginalny",
+        "PointsColGeocodedAddress": "Adres Zgeokodowany",
+        "PointsColGeocodeStatus": "Status Geokodowania",
+        "PointsColMatchType": "Typ Dopasowania",
+        "PointsColIsFallback": "Fallback?",
+        "PointsColLatitude": "Szerokość",
+        "PointsColLongitude": "Długość"
       }
     }
   }

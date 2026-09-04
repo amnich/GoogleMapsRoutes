@@ -265,6 +265,46 @@ function Get-AddressCoordinates {
     }
 }
 
+function Get-GeocodeStatusDescription {
+    [CmdletBinding()]
+    param(
+        [Parameter()][object]$Geo
+    )
+    if (-not $Geo) { return 'NOT_PROCESSED' }
+    if ($Geo.Status -eq 'OK') {
+        if ($Geo.PartialMatch -and $Geo.MatchType -in 'APPROXIMATE', 'GEOMETRIC_CENTER') {
+            return "OK (Fallback: Approximate / Partial Match - $($Geo.MatchType))"
+        }
+        elseif ($Geo.PartialMatch) {
+            return "OK (Fallback: Partial Match - $($Geo.MatchType))"
+        }
+        elseif ($Geo.MatchType -eq 'APPROXIMATE') {
+            return 'OK (Fallback: Approximate)'
+        }
+        elseif ($Geo.MatchType -eq 'GEOMETRIC_CENTER') {
+            return 'OK (Fallback: Geometric Center)'
+        }
+        elseif ($Geo.MatchType -eq 'RANGE_INTERPOLATED') {
+            return 'OK (Interpolated)'
+        }
+        elseif ($Geo.MatchType -eq 'ROOFTOP') {
+            return 'OK (Exact - ROOFTOP)'
+        }
+        elseif ($Geo.MatchType -eq 'COORDINATES') {
+            return 'OK (Coordinates)'
+        }
+        else {
+            return "OK ($($Geo.MatchType))"
+        }
+    }
+    elseif ($Geo.Status -eq 'ZERO_RESULTS') {
+        return 'ZERO_RESULTS (Address Not Found)'
+    }
+    else {
+        return [string]$Geo.Status
+    }
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. OBLICZANIE TRAS (GOOGLE ROUTES API v2)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1307,25 +1347,111 @@ function Export-RouteResults {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
     }
 
+    # Extract flat summary rows (excluding nested Points array from main sheet/file)
+    $RoutesFlat = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $PointsFlat = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($r in $Results) {
+        $routeId   = if ($null -ne $r.Id) { [string]$r.Id } else { '' }
+        $routeName = if ($r.Name) { [string]$r.Name } elseif ($r.Nazwa) { [string]$r.Nazwa } else { "Route $routeId" }
+        $startOrig = if ($r.Start) { [string]$r.Start } else { '' }
+        $startGeo  = if ($r.StartGeocoded) { [string]$r.StartGeocoded } elseif ($r.StartGeokodowany) { [string]$r.StartGeokodowany } else { '' }
+        $startStat = if ($r.StartStatus) { [string]$r.StartStatus } else { '' }
+        $endOrig   = if ($r.End) { [string]$r.End } elseif ($r.Koniec) { [string]$r.Koniec } else { '' }
+        $endGeo    = if ($r.EndGeocoded) { [string]$r.EndGeocoded } elseif ($r.KoniecGeokodowany) { [string]$r.KoniecGeokodowany } else { '' }
+        $endStat   = if ($r.EndStatus) { [string]$r.EndStatus } else { '' }
+        $wpCount   = if ($null -ne $r.WaypointsCount) { [int]$r.WaypointsCount } elseif ($null -ne $r.LiczbaPrzystankow) { [int]$r.LiczbaPrzystankow } else { 0 }
+        $rType     = if ($r.RouteType) { [string]$r.RouteType } elseif ($r.TypTrasy) { [string]$r.TypTrasy } else { '' }
+        $dist      = if ($null -ne $r.DistanceKm) { $r.DistanceKm } elseif ($null -ne $r.OdlegloscKm) { $r.OdlegloscKm } else { $null }
+        $dur       = if ($null -ne $r.DurationMin) { $r.DurationMin } elseif ($null -ne $r.CzasMin) { $r.CzasMin } else { $null }
+        $status    = if ($r.Status) { [string]$r.Status } else { '' }
+        $map       = if ($r.MapPath) { [string]$r.MapPath } elseif ($r.MapaPath) { [string]$r.MapaPath } else { '' }
+        $url       = if ($r.GoogleMapsUrl) { [string]$r.GoogleMapsUrl } else { '' }
+
+        # Build waypoints summary text
+        $wpSummaryList = [System.Collections.Generic.List[string]]::new()
+        if ($r.Points -and ($r.Points -is [System.Collections.IEnumerable])) {
+            foreach ($pt in $r.Points) {
+                if ($pt.PointType -like 'Waypoint*') {
+                    $ptSummary = "$($pt.PointType): '$($pt.OriginalAddress)'"
+                    if ($pt.GeocodedAddress) { $ptSummary += " -> '$($pt.GeocodedAddress)'" }
+                    if ($pt.GeocodeStatus) { $ptSummary += " [$($pt.GeocodeStatus)]" }
+                    $wpSummaryList.Add($ptSummary)
+                }
+
+                $PointsFlat.Add([PSCustomObject]@{
+                    RouteId         = $routeId
+                    RouteName       = $routeName
+                    PointOrder      = $pt.Order
+                    PointType       = $pt.PointType
+                    OriginalAddress = $pt.OriginalAddress
+                    GeocodedAddress = $pt.GeocodedAddress
+                    GeocodeStatus   = $pt.GeocodeStatus
+                    MatchType       = $pt.MatchType
+                    IsFallback      = if ($null -ne $pt.IsFallback) { [bool]$pt.IsFallback } else { $false }
+                    Latitude        = $pt.Latitude
+                    Longitude       = $pt.Longitude
+                })
+            }
+        }
+
+        $wpSummaryText = $wpSummaryList -join ' | '
+
+        $RoutesFlat.Add([PSCustomObject]@{
+            Id               = $routeId
+            Name             = $routeName
+            Start_Original   = $startOrig
+            Start_Geocoded   = $startGeo
+            Start_Status     = $startStat
+            End_Original     = $endOrig
+            End_Geocoded     = $endGeo
+            End_Status       = $endStat
+            WaypointsCount   = $wpCount
+            RouteType        = $rType
+            DistanceKm       = $dist
+            DurationMin      = $dur
+            Status           = $status
+            WaypointsSummary = $wpSummaryText
+            MapPath          = $map
+            GoogleMapsUrl    = $url
+        })
+    }
+
+    $csvEncoding = if ($PSVersionTable.PSVersion.Major -ge 7) { 'utf8BOM' } else { 'UTF8' }
+
     switch ($Format) {
         'Excel' {
             if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
                 Write-Warning "Moduł ImportExcel nie jest zainstalowany. Eksportowanie do CSV zamiast Excel."
                 $CsvPath = [System.IO.Path]::ChangeExtension($OutputPath, '.csv')
-                $Results | Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding UTF8 -Delimiter ';'
+                $RoutesFlat | Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding $csvEncoding -Delimiter ';'
+                if ($PointsFlat.Count -gt 0) {
+                    $PtsCsv = [System.IO.Path]::Combine($TargetDir, "$([System.IO.Path]::GetFileNameWithoutExtension($CsvPath))_punkty.csv")
+                    $PointsFlat | Export-Csv -LiteralPath $PtsCsv -NoTypeInformation -Encoding $csvEncoding -Delimiter ';'
+                }
                 return $CsvPath
             }
             Import-Module -Name ImportExcel -ErrorAction Stop
-            $Results | Export-Excel -Path $OutputPath -WorksheetName 'Trasy' -TableName 'WynikiTras' -AutoSize -AutoFilter -FreezeTopRow
+            if (Test-Path -LiteralPath $OutputPath) {
+                Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
+            }
+            $RoutesFlat | Export-Excel -Path $OutputPath -WorksheetName 'Trasy' -TableName 'WynikiTras' -AutoSize -AutoFilter -FreezeTopRow
+            if ($PointsFlat.Count -gt 0) {
+                $PointsFlat | Export-Excel -Path $OutputPath -WorksheetName 'PunktyTrasy' -TableName 'PunktyTrasy' -AutoSize -AutoFilter -FreezeTopRow
+            }
             return $OutputPath
         }
         'CSV' {
-            $Results | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding UTF8 -Delimiter ';'
+            $RoutesFlat | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding $csvEncoding -Delimiter ';'
+            if ($PointsFlat.Count -gt 0) {
+                $PtsCsv = [System.IO.Path]::Combine($TargetDir, "$([System.IO.Path]::GetFileNameWithoutExtension($OutputPath))_punkty.csv")
+                $PointsFlat | Export-Csv -LiteralPath $PtsCsv -NoTypeInformation -Encoding $csvEncoding -Delimiter ';'
+            }
             return $OutputPath
         }
         'JSON' {
-            $JsonContent = $Results | ConvertTo-Json -Depth 5
-            [System.IO.File]::WriteAllText($OutputPath, $JsonContent, [System.Text.Encoding]::UTF8)
+            $JsonContent = $Results | ConvertTo-Json -Depth 6
+            [System.IO.File]::WriteAllText($OutputPath, $JsonContent, [System.Text.UTF8Encoding]::new($true))
             return $OutputPath
         }
     }
