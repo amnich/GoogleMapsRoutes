@@ -348,54 +348,129 @@ function Save-RouteMapPng {
         [Parameter(Mandatory)][string]$ApiKey,
         [Parameter()][int]$Width = 900,
         [Parameter()][int]$Height = 600,
+        [Parameter()][object[]]$RoutePoints = @(),
         [Parameter()][string]$TekstAdresA = '',
         [Parameter()][string]$TekstAdresB = '',
         [Parameter()][string]$TekstOdleglosc = '',
-        [Parameter()][string]$TekstUmowa = '',
-        [Parameter()][string]$TekstKierunek = '',
+        [Parameter()][string]$TekstCzas = '',
         [Parameter()][string]$TekstNaglowekLewy = '',
         [Parameter()][string]$TekstNaglowekPrawy = '',
+        [Parameter()][string]$TekstUmowa = '',
+        [Parameter()][string]$TekstKierunek = '',
         [Parameter()][string]$Opis = '',
-        [Parameter()][string]$DataWygenerowania = ''
+        [Parameter()][string]$DataWygenerowania = '',
+        [Parameter()][string]$LanguageCode = 'pl'
     )
+
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls
     $EncodedForUrl = [System.Uri]::EscapeDataString($EncodedPolyline)
+    $MarkerParams = [System.Collections.Generic.List[string]]::new()
+
     $MarkerStart = [System.Uri]::EscapeDataString("color:green|label:A|$OriginLat,$OriginLng")
+    $MarkerParams.Add("&markers=$MarkerStart")
+
+    if ($null -ne $RoutePoints -and @($RoutePoints).Count -gt 0) {
+        $IntermediatesOnly = @()
+        if ($RoutePoints.Count -gt 2 -and
+            [math]::Abs($RoutePoints[0].Latitude - $OriginLat) -lt 0.0001 -and
+            [math]::Abs($RoutePoints[-1].Latitude - $DestLat) -lt 0.0001) {
+            $IntermediatesOnly = @($RoutePoints[1..($RoutePoints.Count - 2)])
+        }
+        else {
+            $IntermediatesOnly = @($RoutePoints | Where-Object {
+                $null -ne $_.Latitude -and $null -ne $_.Longitude -and
+                (-not ([math]::Abs($_.Latitude - $OriginLat) -lt 0.0001 -and [math]::Abs($_.Longitude - $OriginLng) -lt 0.0001)) -and
+                (-not ([math]::Abs($_.Latitude - $DestLat) -lt 0.0001 -and [math]::Abs($_.Longitude - $DestLng) -lt 0.0001))
+            })
+        }
+
+        $idx = 1
+        foreach ($pt in $IntermediatesOnly) {
+            if ($pt.Latitude -and $pt.Longitude) {
+                $lbl = if ($idx -le 9) { [string]$idx }
+                       elseif ($idx -le 35) { [string][char](55 + $idx) }
+                       else { '' }
+                $spec = if ($lbl) { "color:blue|label:$lbl|$($pt.Latitude),$($pt.Longitude)" }
+                        else { "size:mid|color:blue|$($pt.Latitude),$($pt.Longitude)" }
+                $MarkerParams.Add("&markers=" + [System.Uri]::EscapeDataString($spec))
+                $idx++
+            }
+        }
+    }
+
     $MarkerEnd = [System.Uri]::EscapeDataString("color:red|label:B|$DestLat,$DestLng")
+    $MarkerParams.Add("&markers=$MarkerEnd")
+
+    $lang = if ($LanguageCode) { ($LanguageCode -split '[-_]')[0].ToLower() } else { 'pl' }
     $StaticMapUrl = ("https://maps.googleapis.com/maps/api/staticmap" +
         "?size=${Width}x${Height}" +
+        "&language=$lang" +
         "&path=weight:4|color:0x0066FFff|enc:$EncodedForUrl" +
-        "&markers=$MarkerStart" +
-        "&markers=$MarkerEnd" +
+        ($MarkerParams -join '') +
         "&key=$ApiKey")
-    try {
-        Invoke-WebRequest -Uri $StaticMapUrl -OutFile $OutputPath -TimeoutSec 30 | Out-Null
 
-        # Header Left: Opis (preferred), fallback to NumerUmowy (no 'Contract: ' prefix)
+    try {
+        $TargetDir = Split-Path -Parent $OutputPath
+        if (-not [string]::IsNullOrWhiteSpace($TargetDir) -and -not (Test-Path $TargetDir)) {
+            New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+        }
+
+        $wc = [System.Net.WebClient]::new()
+        try {
+            $wc.DownloadFile($StaticMapUrl, $OutputPath)
+        }
+        finally {
+            $wc.Dispose()
+        }
+
+        # Header Left: Description / Title / Contract
         if ([string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
             if (-not [string]::IsNullOrWhiteSpace($Opis)) {
                 $TekstNaglowekLewy = $Opis.Trim()
             } elseif (-not [string]::IsNullOrWhiteSpace($TekstUmowa)) {
-                $TekstNaglowekLewy = $TekstUmowa.Trim()
+                $TekstNaglowekLewy = if ($TekstUmowa -match '^(numer\s*umowy|contract|umowa|nr\s*umowy):') { $TekstUmowa } else { "Contract: $TekstUmowa" }
             }
         }
 
-        # Header Right: Date of generation (upper right corner)
+        # Header Right: Direction / Route Type / Date
         if ([string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-            if ([string]::IsNullOrWhiteSpace($DataWygenerowania)) {
-                $DataWygenerowania = (Get-Date).ToString('yyyy-MM-dd')
+            if (-not [string]::IsNullOrWhiteSpace($TekstKierunek)) {
+                $prefixDir = switch ($lang) { 'de' { 'Richtung: ' } 'pl' { 'Kierunek: ' } default { 'Direction: ' } }
+                $TekstNaglowekPrawy = if ($TekstKierunek -match '^(kierunek|direction|route|trasa|richtung):') { $TekstKierunek } else { "$prefixDir$TekstKierunek" }
             }
-            $TekstNaglowekPrawy = "Data: $DataWygenerowania"
+        }
+        else {
+            # Localize passed Type / Typ string according to $LanguageCode
+            if ($TekstNaglowekPrawy -match '^(?:Type|Typ|Art):\s*(.+)$' -or $TekstNaglowekPrawy -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
+                $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
+                $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
+                           elseif ($rawVal -match '(?i)eco|eko|fuel') { 'Eco' }
+                           elseif ($rawVal -match '(?i)fast|szyb|schnell') { 'Fastest' }
+                           else { $rawVal }
+
+                $tPrefix = switch ($lang) { 'de' { 'Typ: ' } 'pl' { 'Typ: ' } default { 'Type: ' } }
+                $tName = switch ($lang) {
+                    'de' { if ($normVal -eq 'Fastest') { 'Schnellste' } elseif ($normVal -eq 'Shortest') { 'Kürzeste' } elseif ($normVal -eq 'Eco') { 'Eco' } else { $normVal } }
+                    'pl' { if ($normVal -eq 'Fastest') { 'Najszybsza' } elseif ($normVal -eq 'Shortest') { 'Najkrótsza' } elseif ($normVal -eq 'Eco') { 'Eko' } else { $normVal } }
+                    default { $normVal }
+                }
+                $TekstNaglowekPrawy = "$tPrefix$tName"
+            }
         }
 
-        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) -or
-                        (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy))
+        # Format distance and duration string
+        $TekstOdlegloscWyswietlana = $TekstOdleglosc
+        if (-not [string]::IsNullOrWhiteSpace($TekstCzas)) {
+            $TekstOdlegloscWyswietlana = if ($TekstOdlegloscWyswietlana) { "$TekstOdlegloscWyswietlana  ($TekstCzas)" } else { $TekstCzas }
+        }
 
-        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or
-                           (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or
-                           (-not [string]::IsNullOrWhiteSpace($TekstOdleglosc))
+        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) -or (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy))
+        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana))
 
-        if ($MaBottomOverlay -or $MaTopOverlay) {
+        if ($MaTopOverlay -or $MaBottomOverlay) {
             try {
+                Add-Type -AssemblyName System.Drawing
+
                 $FileBytes = [System.IO.File]::ReadAllBytes($OutputPath)
                 $MemStream = [System.IO.MemoryStream]::new($FileBytes)
                 $BitmapSrc = [System.Drawing.Bitmap]::new($MemStream)
@@ -403,143 +478,144 @@ function Save-RouteMapPng {
                 $ActualW = $BitmapSrc.Width
                 $ActualH = $BitmapSrc.Height
 
-                # Calculate extra canvas space for top and bottom extensions
-                $TopBarH = if ($MaTopOverlay) { 36 } else { 0 }
-                $BtmBarH = if ($MaBottomOverlay) { 60 } else { 0 }
-                $FinalW  = $ActualW
-                $FinalH  = $ActualH + $TopBarH + $BtmBarH
+                # Fonts definition
+                $FontTopTitle = [System.Drawing.Font]::new('Segoe UI', 10.0, [System.Drawing.FontStyle]::Bold)
+                $FontTopType  = [System.Drawing.Font]::new('Segoe UI', 10.0, [System.Drawing.FontStyle]::Bold)
+                $FontBadge    = [System.Drawing.Font]::new('Segoe UI', 9.0,  [System.Drawing.FontStyle]::Bold)
+                $FontAddr     = [System.Drawing.Font]::new('Segoe UI', 9.5,  [System.Drawing.FontStyle]::Regular)
+                $FontDistLbl  = [System.Drawing.Font]::new('Segoe UI', 9.0,  [System.Drawing.FontStyle]::Bold)
+                $FontDist     = [System.Drawing.Font]::new('Segoe UI', 12.0, [System.Drawing.FontStyle]::Bold)
+                $FontDate     = [System.Drawing.Font]::new('Segoe UI', 8.5,  [System.Drawing.FontStyle]::Regular)
 
-                # Create enlarged canvas
+                $TopBarH = if ($MaTopOverlay) { 38 } else { 0 }
+
+                # Pre-measure bottom text lines using temporary Graphics
+                $dummyBmp = [System.Drawing.Bitmap]::new(1, 1)
+                $measGfx  = [System.Drawing.Graphics]::FromImage($dummyBmp)
+
+                $PadX       = 14
+                $LineH      = 20
+                $LabelASize = $measGfx.MeasureString('A: ', $FontBadge)
+                $LabelBSize = $measGfx.MeasureString('B: ', $FontBadge)
+                $LabelMaxW  = [float][math]::Max($LabelASize.Width, $LabelBSize.Width)
+                $AvailW     = [float]($ActualW - ($PadX * 2))
+                $AddrMaxW   = [float]($AvailW - $LabelMaxW)
+
+                $LinesA = @(Get-WrappedLines -G $measGfx -Text $TekstAdresA -F $FontAddr -MaxW $AddrMaxW)
+                $LinesB = @(Get-WrappedLines -G $measGfx -Text $TekstAdresB -F $FontAddr -MaxW $AddrMaxW)
+                $measGfx.Dispose()
+                $dummyBmp.Dispose()
+
+                $LinesACount = [math]::Max(1, $LinesA.Count)
+                $LinesBCount = [math]::Max(1, $LinesB.Count)
+
+                $BtmPadTop   = 10
+                $BtmPadBot   = 10
+                $SpacingAB   = 4
+                $SpacingDist = 8
+                $DistLineH   = 24
+
+                $BtmBarH = if ($MaBottomOverlay) {
+                    $BtmPadTop + ($LinesACount * $LineH) + $SpacingAB + ($LinesBCount * $LineH) + $SpacingDist + $DistLineH + $BtmPadBot
+                } else { 0 }
+
+                # Canvas extension: Map is preserved 100% in the middle with extra height on top and bottom
+                $FinalW = $ActualW
+                $FinalH = $ActualH + $TopBarH + $BtmBarH
+
                 $Bitmap = [System.Drawing.Bitmap]::new($FinalW, $FinalH, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
                 $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
                 $Graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
                 $Graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
 
-                # 1. Fill canvas with solid clean white
-                $BrushWhite = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
-                $Graphics.FillRectangle($BrushWhite, 0, 0, $FinalW, $FinalH)
+                # 1. Fill solid background with dark slate #0F172A
+                $BrushBg = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 15, 23, 42))
+                $Graphics.FillRectangle($BrushBg, 0, 0, $FinalW, $FinalH)
 
-                # 2. Draw map in the middle — untouched and 100% visible
+                # 2. Draw map in the middle — untouched and 100% visible (no overlays covering map content)
                 $Graphics.DrawImage($BitmapSrc, 0, $TopBarH, $ActualW, $ActualH)
 
-                # 3. Separator lines
-                $PenBorder = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(210, 220, 230), 1)
-                if ($TopBarH -gt 0) {
-                    $Graphics.DrawLine($PenBorder, 0, $TopBarH, $FinalW, $TopBarH)
-                }
-                if ($BtmBarH -gt 0) {
-                    $BtmBarY = $TopBarH + $ActualH
-                    $Graphics.DrawLine($PenBorder, 0, $BtmBarY, $FinalW, $BtmBarY)
-                }
+                # 3. Separator lines and color brushes
+                $PenSep      = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255, 51, 65, 85), 1.5)
+                $BrushWhite  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 248, 250, 252))
+                $BrushYellow = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 250, 204, 21))
+                $BrushCyan   = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 56, 189, 248))
+                $BrushGreen  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 16, 185, 129))
+                $BrushRed    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 239, 68, 68))
+                $BrushMuted  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 148, 163, 184))
 
-                # 4. Top banner (Opis on left, Date of generation on upper right)
+                # 4. Top Header Banner (Extended on top)
                 if ($MaTopOverlay) {
-                    $FontTopTitle = [System.Drawing.Font]::new('Segoe UI', 11.0, [System.Drawing.FontStyle]::Bold)
-                    $FontTopDate  = [System.Drawing.Font]::new('Segoe UI', 9.5,  [System.Drawing.FontStyle]::Regular)
-                    $BrushDark    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 15, 23, 42))
-                    $BrushGray    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 100, 116, 139))
+                    $Graphics.DrawLine($PenSep, 0, $TopBarH, $FinalW, $TopBarH)
+                    $TopTextY = [float](($TopBarH - $FontTopTitle.Height) / 2)
+                    $CurLeftX = [float]$PadX
 
                     if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-                        $Graphics.DrawString($TekstNaglowekLewy, $FontTopTitle, $BrushDark, 14.0, 7.0)
-                    }
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-                        $SizePrawego = $Graphics.MeasureString($TekstNaglowekPrawy, $FontTopDate)
-                        $XPrawy = [math]::Max(0.0, [double]($FinalW - $SizePrawego.Width - 14.0))
-                        $Graphics.DrawString($TekstNaglowekPrawy, $FontTopDate, $BrushGray, [single]$XPrawy, 9.0)
+                        $Graphics.DrawString($TekstNaglowekLewy, $FontTopTitle, $BrushWhite, $CurLeftX, $TopTextY)
+                        $CurLeftX += $Graphics.MeasureString($TekstNaglowekLewy, $FontTopTitle).Width
                     }
 
-                    $FontTopTitle.Dispose()
-                    $FontTopDate.Dispose()
-                    $BrushDark.Dispose()
-                    $BrushGray.Dispose()
+                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
+                        $SizeR = $Graphics.MeasureString($TekstNaglowekPrawy, $FontTopType)
+                        $RightStartX = [float][math]::Max($CurLeftX + 15, $FinalW - $PadX - $SizeR.Width)
+                        $Graphics.DrawString($TekstNaglowekPrawy, $FontTopType, $BrushYellow, $RightStartX, $TopTextY)
+                    }
                 }
 
-                # 5. Bottom banner (Address [A] on line 1, Address [B] on line 2, Total km in right corner)
+                # 5. Bottom Footer Banner (Extended on bottom, distance & time a line lower)
                 if ($MaBottomOverlay) {
                     $BtmBarY = $TopBarH + $ActualH
-                    $FontBadge      = [System.Drawing.Font]::new('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
-                    $FontAddr       = [System.Drawing.Font]::new('Segoe UI', 9.0, [System.Drawing.FontStyle]::Regular)
-                    $FontDistLabel  = [System.Drawing.Font]::new('Segoe UI', 7.5, [System.Drawing.FontStyle]::Regular)
-                    $FontDistValue  = [System.Drawing.Font]::new('Segoe UI', 13.5, [System.Drawing.FontStyle]::Bold)
+                    $Graphics.DrawLine($PenSep, 0, $BtmBarY, $FinalW, $BtmBarY)
 
-                    $BrushDark      = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 15, 23, 42))
-                    $BrushGray      = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 100, 116, 139))
-                    $BrushBadgeA    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 22, 163, 74))
-                    $BrushBadgeB    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 220, 38, 38))
-                    $BrushDist      = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 2, 132, 199))
+                    $CurY = [float]($BtmBarY + $BtmPadTop)
+                    $LabelXOffset = [float]($PadX + $LabelMaxW)
 
-                    # Distance display in bottom right corner
-                    $distDisplay = if ($TekstOdleglosc -match 'km\s*$') {
-                        $TekstOdleglosc.Trim()
-                    } elseif (-not [string]::IsNullOrWhiteSpace($TekstOdleglosc)) {
-                        "$($TekstOdleglosc.Trim()) km"
-                    } else {
-                        ''
+                    # Line 1: Origin [A]
+                    $Graphics.DrawString('A: ', $FontBadge, $BrushGreen, [float]$PadX, $CurY)
+                    foreach ($Line in $LinesA) {
+                        $Graphics.DrawString($Line, $FontAddr, $BrushWhite, $LabelXOffset, $CurY)
+                        $CurY += [float]$LineH
                     }
 
-                    $distValSize = if ($distDisplay) { $Graphics.MeasureString($distDisplay, $FontDistValue) } else { [System.Drawing.SizeF]::Empty }
-                    $distLblSize = if ($distDisplay) { $Graphics.MeasureString('Dystans:', $FontDistLabel) } else { [System.Drawing.SizeF]::Empty }
-                    $distBoxW    = [math]::Max($distValSize.Width, $distLblSize.Width)
-                    $distRightX  = [single]($FinalW - 14.0)
-
-                    if (-not [string]::IsNullOrWhiteSpace($distDisplay)) {
-                        $Graphics.DrawString('Dystans:', $FontDistLabel, $BrushGray, [single]($distRightX - $distLblSize.Width), [single]($BtmBarY + 8.0))
-                        $Graphics.DrawString($distDisplay, $FontDistValue, $BrushDist, [single]($distRightX - $distValSize.Width), [single]($BtmBarY + 23.0))
+                    # Line 2: Destination [B]
+                    $CurY += [float]$SpacingAB
+                    $Graphics.DrawString('B: ', $FontBadge, $BrushRed, [float]$PadX, $CurY)
+                    foreach ($Line in $LinesB) {
+                        $Graphics.DrawString($Line, $FontAddr, $BrushWhite, $LabelXOffset, $CurY)
+                        $CurY += [float]$LineH
                     }
 
-                    # Address [A] and Address [B] calculation (stacked on 2 lines, cannot trim or exceed frame)
-                    $reservedRight = if ($distBoxW -gt 0) { $distBoxW + 28.0 } else { 14.0 }
-                    $maxAddrW = [single]([math]::Max(160.0, ($FinalW - 40.0 - $reservedRight)))
-
-                    $fmt = [System.Drawing.StringFormat]::new()
-                    $fmt.Trimming = [System.Drawing.StringTrimming]::EllipsisCharacter
-                    $fmt.FormatFlags = [System.Drawing.StringFormatFlags]::NoWrap
-
-                    # Line 1: [A] + Address A
-                    if (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) {
-                        $Graphics.DrawString('[A]', $FontBadge, $BrushBadgeA, 14.0, [single]($BtmBarY + 8.0))
-                        $fontA = $FontAddr
-                        if ($Graphics.MeasureString($TekstAdresA, $FontAddr).Width -gt $maxAddrW) {
-                            $fontA = [System.Drawing.Font]::new('Segoe UI', 8.0, [System.Drawing.FontStyle]::Regular)
-                        }
-                        $rectA = [System.Drawing.RectangleF]::new(40.0, [single]($BtmBarY + 8.0), $maxAddrW, 20.0)
-                        $Graphics.DrawString($TekstAdresA, $fontA, $BrushDark, $rectA, $fmt)
-                        if ($fontA -ne $FontAddr) { $fontA.Dispose() }
+                    # Line 3: Distance and Duration A LINE LOWER (never overlaps with addresses)
+                    $CurY += [float]$SpacingDist
+                    if (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana)) {
+                        $distLblText = switch ($lang) { 'de' { 'Gesamt: ' } 'pl' { 'Razem: ' } default { 'Total: ' } }
+                        $distLblSize = $Graphics.MeasureString($distLblText, $FontDistLbl)
+                        $Graphics.DrawString($distLblText, $FontDistLbl, $BrushCyan, [float]$PadX, [float]($CurY + 2))
+                        $Graphics.DrawString($TekstOdlegloscWyswietlana, $FontDist, $BrushYellow, [float]($PadX + $distLblSize.Width), $CurY)
                     }
 
-                    # Line 2: [B] + Address B
-                    if (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) {
-                        $Graphics.DrawString('[B]', $FontBadge, $BrushBadgeB, 14.0, [single]($BtmBarY + 32.0))
-                        $fontB = $FontAddr
-                        if ($Graphics.MeasureString($TekstAdresB, $FontAddr).Width -gt $maxAddrW) {
-                            $fontB = [System.Drawing.Font]::new('Segoe UI', 8.0, [System.Drawing.FontStyle]::Regular)
-                        }
-                        $rectB = [System.Drawing.RectangleF]::new(40.0, [single]($BtmBarY + 32.0), $maxAddrW, 20.0)
-                        $Graphics.DrawString($TekstAdresB, $fontB, $BrushDark, $rectB, $fmt)
-                        if ($fontB -ne $FontAddr) { $fontB.Dispose() }
-                    }
-
-                    $fmt.Dispose()
-                    $FontBadge.Dispose()
-                    $FontAddr.Dispose()
-                    $FontDistLabel.Dispose()
-                    $FontDistValue.Dispose()
-                    $BrushDark.Dispose()
-                    $BrushGray.Dispose()
-                    $BrushBadgeA.Dispose()
-                    $BrushBadgeB.Dispose()
-                    $BrushDist.Dispose()
+                    # Timestamp on Line 3 (Right aligned)
+                    $DateStr   = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
+                    $DateSizeF = $Graphics.MeasureString($DateStr, $FontDate)
+                    $DateX     = [float]($FinalW - $DateSizeF.Width - $PadX)
+                    $DateY     = [float]($CurY + 3)
+                    $Graphics.DrawString($DateStr, $FontDate, $BrushMuted, $DateX, $DateY)
                 }
 
-                $BrushWhite.Dispose()
-                $PenBorder.Dispose()
+                # Dispose GDI+ objects
+                $PenSep.Dispose()
+                $BrushBg.Dispose(); $BrushWhite.Dispose(); $BrushYellow.Dispose()
+                $BrushCyan.Dispose(); $BrushGreen.Dispose(); $BrushRed.Dispose(); $BrushMuted.Dispose()
+                $FontTopTitle.Dispose(); $FontTopType.Dispose()
+                $FontBadge.Dispose(); $FontAddr.Dispose(); $FontDistLbl.Dispose(); $FontDist.Dispose(); $FontDate.Dispose()
                 $Graphics.Dispose()
 
                 $Bitmap.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
                 $Bitmap.Dispose()
                 $BitmapSrc.Dispose()
                 $MemStream.Dispose()
-            } catch {}
+            }
+            catch { }
         }
         return $true
     }
@@ -659,6 +735,112 @@ function Find-ColumnHeader {
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+            <ControlTemplate x:Key="ComboBoxToggleButtonTemplate" TargetType="ToggleButton">
+            <Border x:Name="TemplateRoot" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                <Border x:Name="SplitBorder" Width="26" HorizontalAlignment="Right" Background="Transparent">
+                    <Path x:Name="Arrow" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#94A3B8" Data="M 0 0 L 4 4 L 8 0 Z"/>
+                </Border>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="true">
+                    <Setter TargetName="TemplateRoot" Property="BorderBrush" Value="#64748B"/>
+                    <Setter TargetName="Arrow" Property="Fill" Value="#F8FAFC"/>
+                </Trigger>
+                <Trigger Property="IsChecked" Value="true">
+                    <Setter TargetName="TemplateRoot" Property="BorderBrush" Value="#2563EB"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="false">
+                    <Setter TargetName="TemplateRoot" Property="Opacity" Value="0.5"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#1E293B"/>
+            <Setter Property="Foreground" Value="#F8FAFC"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid x:Name="MainGrid" SnapsToDevicePixels="true">
+                            <ToggleButton x:Name="ToggleButton"
+                                          Template="{StaticResource ComboBoxToggleButtonTemplate}"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          Focusable="false"
+                                          IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press"/>
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="false"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"/>
+                            <Popup x:Name="Popup"
+                                   Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="true"
+                                   Focusable="false"
+                                   PopupAnimation="Slide">
+                                <Grid x:Name="DropDown" SnapsToDevicePixels="true" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder" Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="5" Margin="0,2,0,0">
+                                        <ScrollViewer Margin="2" SnapsToDevicePixels="true">
+                                            <StackPanel IsItemsHost="true" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="HasItems" Value="false">
+                                <Setter TargetName="DropDownBorder" Property="MinHeight" Value="40"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="false">
+                                <Setter Property="Opacity" Value="0.6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#1E293B"/>
+            <Setter Property="Foreground" Value="#F8FAFC"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="true">
+                            <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="true">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#2563EB"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="true">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#1D4ED8"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="false">
+                                <Setter Property="Foreground" Value="#64748B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
@@ -804,7 +986,7 @@ function Find-ColumnHeader {
 
                 <StackPanel Grid.Column="2">
                     <TextBlock Text="📐 PNG Map Dimensions" FontWeight="Bold" FontSize="13" Foreground="#F8FAFC" Margin="0,0,0,6"/>
-                    <ComboBox Name="cmbMapDimensions" Height="36" Background="#1E293B" Foreground="#0F172A" FontSize="12">
+                    <ComboBox Name="cmbMapDimensions" Height="36" Background="#1E293B" Foreground="#F8FAFC" FontSize="12">
                         <ComboBoxItem Content="900 x 600 px (Recommended)" IsSelected="True" Tag="900x600"/>
                         <ComboBoxItem Content="1024 x 768 px" Tag="1024x768"/>
                         <ComboBoxItem Content="1200 x 800 px" Tag="1200x800"/>

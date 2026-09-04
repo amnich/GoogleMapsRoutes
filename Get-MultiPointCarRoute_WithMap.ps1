@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Tworzy jedna trase samochodowa przez wiele punktow z pliku Excel.

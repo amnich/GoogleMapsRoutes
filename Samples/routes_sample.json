@@ -1,0 +1,28 @@
+﻿[
+  {
+    "Nazwa": "Trasa Warszawa - Kraków (Przez Radom i Kielce)",
+    "Start": "Warszawa, Plac Defilad 1",
+    "Koniec": "Kraków, Rynek Główny 1",
+    "PunktyPosrednie": [
+      "Radom, Plac Konstytucji 3 Maja 1",
+      "Kielce, Sienkiewicza 1"
+    ],
+    "TypTrasy": "Fastest"
+  },
+  {
+    "Nazwa": "Trasa Gdańsk - Toruń (Najkrótsza)",
+    "Start": "Gdańsk, Długa 1",
+    "Koniec": "Toruń, Rynek Staromiejski 1",
+    "PunktyPosrednie": [],
+    "TypTrasy": "Shortest"
+  },
+  {
+    "Nazwa": "Trasa Poznań - Wrocław (Ekologiczna)",
+    "Start": "Poznań, Stary Rynek 1",
+    "Koniec": "Wrocław, Rynek 1",
+    "PunktyPosrednie": [
+      "Leszno, Rynek 1"
+    ],
+    "TypTrasy": "Eco"
+  }
+]

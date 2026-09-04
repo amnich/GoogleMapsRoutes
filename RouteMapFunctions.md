@@ -1,73 +1,43 @@
 ﻿# RouteMapFunctions — Architecture
 
 <!-- AUTO:metadata -->
-- **Script Path:** `D:\Skrypty\Mnich_Adam_Skrypty\Mapy Google\RouteMapFunctions.ps1`
-- **Last Synced:** `2026-09-02` (`Uncommitted`)
+- **Script Path:** `D:\Skrypty\GoogleMapsRoutes\RouteMapFunctions.ps1`
+- **Last Synced:** `2026-09-04`
 - **Type:** PowerShell Script (.ps1)
 <!-- /AUTO -->
 
 ## Overview
 <!-- AUTO:overview -->
-Wspólne funkcje do geokodowania adresów, obliczania tras i generowania map PNG. Moduł funkcji wykorzystywany przez Get-CarRoute_WithMap.ps1 oraz Process-SchoolTransportRoutes.ps1. Zawiera: - Select-InputExcel — dialog wyboru pliku Excel - Get-AddressCoordinates — geokodowanie adresu przez Google Geocoding API - Get-CarRouteData — obliczanie trasy przez Google Routes API v2 - Save-RouteMapPng — generowanie mapy PNG przez Google Static Maps API
-<!-- /AUTO -->
-
-## Parameters
-<!-- AUTO:parameters -->
-| Name | Type | Mandatory | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| *None* | N/A | N/A | N/A | Script accepts no CLI parameters; configuration is loaded internally or uses defaults |
+Wspólne funkcje do geokodowania adresów, obliczania tras (Fastest, Shortest, Eco), generowania map poglądowych PNG oraz uniwersalnego importu i eksportu danych tras (JSON, CSV, Excel). Moduł wykorzystywany przez `GoogleMapsRoutes-GUI.ps1`, `Invoke-GoogleMapsRoute.ps1`, `Get-CarRoute_WithMap.ps1`, `Get-MultiPointCarRoute_WithMap.ps1` oraz `Process-SchoolTransportRoutes.ps1`.
 <!-- /AUTO -->
 
 ## Functions
 <!-- AUTO:functions -->
-| Name | Purpose | Calls |
-| :--- | :--- | :--- |
-| `Select-InputExcel` | Internal routine supporting script workflow | `Add-Type` |
-| `Get-AddressComponentValue` | Internal routine supporting script workflow | `Where-Object`, `Select-Object` |
-| `Get-AddressCoordinates` | Internal routine supporting script workflow | `Write-Verbose`, `Invoke-RestMethod`, `Get-AddressComponentValue` |
-| `Get-CarRouteData` | Internal routine supporting script workflow | `Write-Verbose`, `Invoke-RestMethod`, `ConvertTo-Json` |
-| `Save-RouteMapPng` | Internal routine supporting script workflow | `Write-Verbose`, `Invoke-WebRequest`, `Out-Null` |
-| `Get-WrappedLines` | Internal routine supporting script workflow | `Internal Logic` |
+| Name | Purpose | Parameters | Returns |
+| :--- | :--- | :--- | :--- |
+| `Select-InputDataFile` | Okno dialogowe wyboru pliku z danymi (JSON, CSV, TSV, XLSX, XLS) | *None* | `[string]` Ścieżka pliku |
+| `Select-InputExcel` | Okno dialogowe wyboru pliku Excel (.xlsx, .xls) | *None* | `[string]` Ścieżka pliku |
+| `Protect-SecretString` | Szyfruje tekst (klucz API) za pomocą Windows DPAPI per-user | `-PlainText` | `[string]` Base64 szyfrogramu |
+| `Unprotect-SecretString` | Odszyfrowuje tekst z Windows DPAPI per-user | `-EncryptedText` | `[string]` Tekst jawny |
+| `Test-GoogleApiKey` | Sprawdza poprawność klucza API wykonując zapytanie testowe | `-ApiKey` | `[PSCustomObject]` (Valid, Message) |
+| `Get-AddressCoordinates` | Geokoduje adres na współrzędne geograficzne (lat/lng) lub weryfikuje podane współrzędne | `-Address`, `-ApiKey`, `-RequireStreetNumber` | `[PSCustomObject]` (Latitude, Longitude, FormattedAddress, Status) |
+| `Get-CarRouteData` | Oblicza trasę samochodową (Fastest, Shortest, Eco) przez Google Routes API v2 | `-OriginLat`, `-OriginLng`, `-DestLat`, `-DestLng`, `-ApiKey`, `-IntermediatePoints`, `-RouteType`, `-EmissionType`, `-TrafficAware` | `[PSCustomObject]` (OdlegloscKm, CzasMin, EncodedPolyline, RouteType, Status) |
+| `Get-GoogleMapsUrl` | Generuje bezpośredni link do trasy w Google Maps z uwzględnieniem punktów pośrednich | `-Origin`, `-Destination`, `-Waypoints`, `-TravelMode` | `[string]` URL |
+| `Save-RouteMapPng` | Pobiera mapę PNG przez Static Maps API z wieloma znacznikami (A, 1..N, B) i nakładką tekstową | `-EncodedPolyline`, `-OriginLat`, `-OriginLng`, `-DestLat`, `-DestLng`, `-OutputPath`, `-ApiKey`, `-RoutePoints`, `-Width`, `-Height`, `-TekstAdresA`, `-TekstAdresB`, `-TekstOdleglosc`, `-TekstCzas`, `-TekstNaglowekLewy`, `-TekstNaglowekPrawy` | `[bool]` Sukces zapisu |
+| `Import-RouteDataFile` | Wczytuje i automatycznie mapuje trasy z plików JSON, CSV, TSV oraz Excel | `-Path`, `-Delimiter` | `[PSCustomObject]` (Mode, Routes, Format, TotalCount) |
+| `Export-RouteResults` | Zapisuje wyniki obliczeń do formatu Excel (.xlsx), CSV (.csv) lub JSON (.json) | `-Results`, `-OutputPath`, `-Format` | `[string]` Ścieżka pliku wyjściowego |
 <!-- /AUTO -->
 
 ## Dependencies
 <!-- AUTO:dependencies -->
-- **Modules:** `ActiveDirectory`
-- **External Tools:** REST/Web API Client (`System.Net`)
-- **Config & Environment:** *None*
-- **Infrastructure:** *Local System Execution*
-<!-- /AUTO -->
-
-## Data Flow
-<!-- AUTO:dataflow -->
-1. **Input / Init:** Initializes runtime environment, loads configuration or input parameters, and verifies required modules.
-2. **Processing:** Executes core queries, Business Central / SQL Server operations, and data transformations.
-3. **Output:** Outputs formatted results, generates file artifacts (CSV/JSON/XLSX), or applies configuration changes.
-<!-- /AUTO -->
-
-## Error Handling & Logging
-<!-- AUTO:errors-and-logging -->
-- **Errors:** Structured `try/catch` error trapping wrapping critical operations
-- **Logging:** Standard console stream output (`Write-Host`, `Write-Verbose`, `Write-Warning`)
-<!-- /AUTO -->
-
-## Security Notes
-<!-- AUTO:security -->
-- **Privileges:** Standard user permissions; requires appropriate domain read/write access to target resources
-- **Credentials:** Operates under current caller Windows Integrated Security context
-- **Sensitive Ops:** Read-only inspection and reporting operations
-<!-- /AUTO -->
-
-## Usage Example
-<!-- AUTO:usage -->
-```powershell
-.\RouteMapFunctions.ps1
-```
+- **Modules:** `ImportExcel` (opcjonalny, do obsługi plików .xlsx)
+- **External Tools:** Google Maps API (Routes API v2, Geocoding API, Static Maps API)
+- **Infrastructure:** Windows Presentation Framework (WPF), System.Drawing (GDI+), System.Security (DPAPI)
 <!-- /AUTO -->
 
 ## Notes
 <!-- MANUAL -->
 <!-- Agents: preserve this section verbatim during updates. -->
-- Funkcja `Save-RouteMapPng` obsługuje opcjonalny górny pasek nagłówka informacyjnego (parametry `-TekstUmowa` / `-TekstKierunek` lub `-TekstNaglowekLewy` / `-TekstNaglowekPrawy`).
+- Funkcja `Save-RouteMapPng` obsługuje zarówno trasy proste (A -> B), jak i trasy wielopunktowe (A -> 1..N -> B).
+- Formatowanie tekstu nakładki graficznej GDI+ jest realizowane dynamicznie na podstawie obliczonych linii adresu i wielkości czcionki Segoe UI.
 <!-- /MANUAL -->
-
