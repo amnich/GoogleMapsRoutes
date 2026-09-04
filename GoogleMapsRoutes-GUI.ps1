@@ -512,7 +512,15 @@ function Save-RouteMapPng {
         [Parameter()][string]$TekstKierunek = '',
         [Parameter()][string]$Opis = '',
         [Parameter()][string]$DataWygenerowania = '',
-        [Parameter()][string]$LanguageCode = 'en'
+        [Parameter()][string]$LanguageCode = 'en',
+        [Parameter()][string]$StartRaw = '',
+        [Parameter()][string]$StartGeocoded = '',
+        [Parameter()][string]$EndRaw = '',
+        [Parameter()][string]$EndGeocoded = '',
+        [Parameter()][object[]]$WaypointsList = @(),
+        [Parameter()][string]$RouteName = '',
+        [Parameter()][string]$RouteType = '',
+        [Parameter()][object]$OverlayConfig = $null
     )
 
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls
@@ -576,49 +584,161 @@ function Save-RouteMapPng {
             $wc.Dispose()
         }
 
-        # Header Left: Description / Title / Contract
-        if ([string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-            if (-not [string]::IsNullOrWhiteSpace($Opis)) {
-                $TekstNaglowekLewy = $Opis.Trim()
-            } elseif (-not [string]::IsNullOrWhiteSpace($TekstUmowa)) {
-                $TekstNaglowekLewy = if ($TekstUmowa -match '^(numer\s*umowy|contract|umowa|nr\s*umowy):') { $TekstUmowa } else { "Contract: $TekstUmowa" }
-            }
+        # Resolve overlay configuration
+        if ($OverlayConfig -is [string] -and -not [string]::IsNullOrWhiteSpace($OverlayConfig)) {
+            try { $OverlayConfig = $OverlayConfig | ConvertFrom-Json } catch { }
         }
-
-        # Header Right: Direction / Route Type / Date
-        if ([string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-            if (-not [string]::IsNullOrWhiteSpace($TekstKierunek)) {
-                $prefixDir = switch ($lang) { 'de' { 'Richtung: ' } 'pl' { 'Kierunek: ' } default { 'Direction: ' } }
-                $TekstNaglowekPrawy = if ($TekstKierunek -match '^(kierunek|direction|route|trasa|richtung):') { $TekstKierunek } else { "$prefixDir$TekstKierunek" }
-            }
-        }
-        else {
-            # Localize passed Type / Typ string according to $LanguageCode
-            if ($TekstNaglowekPrawy -match '^(?:Type|Typ|Art):\s*(.+)$' -or $TekstNaglowekPrawy -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
-                $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
-                $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
-                           elseif ($rawVal -match '(?i)eco|eko|fuel') { 'Eco' }
-                           elseif ($rawVal -match '(?i)fast|szyb|schnell') { 'Fastest' }
-                           else { $rawVal }
-
-                $tPrefix = switch ($lang) { 'de' { 'Typ: ' } 'pl' { 'Typ: ' } default { 'Type: ' } }
-                $tName = switch ($lang) {
-                    'de' { if ($normVal -eq 'Fastest') { 'Schnellste' } elseif ($normVal -eq 'Shortest') { 'Kürzeste' } elseif ($normVal -eq 'Eco') { 'Eco' } else { $normVal } }
-                    'pl' { if ($normVal -eq 'Fastest') { 'Najszybsza' } elseif ($normVal -eq 'Shortest') { 'Najkrótsza' } elseif ($normVal -eq 'Eco') { 'Eko' } else { $normVal } }
-                    default { $normVal }
+        if (-not $OverlayConfig) {
+            $OverlayConfig = [PSCustomObject]@{
+                EnableTopOverlay    = $true
+                EnableBottomOverlay = $true
+                Items               = [PSCustomObject]@{
+                    StartGeocoded = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 1 }
+                    EndGeocoded   = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 2 }
+                    Distance      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 3 }
+                    Duration      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Center'; Order = 3 }
+                    Timestamp     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Right';  Order = 3 }
+                    RouteName     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Align = 'Left';   Order = 1 }
+                    RouteType     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Align = 'Right';  Order = 1 }
+                    Waypoints     = [PSCustomObject]@{ Enabled = $false; Panel = 'Bottom'; Align = 'Left';   Order = 2 }
+                    StartRaw      = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 1 }
+                    EndRaw        = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 2 }
                 }
-                $TekstNaglowekPrawy = "$tPrefix$tName"
             }
         }
 
-        # Format distance and duration string
-        $TekstOdlegloscWyswietlana = $TekstOdleglosc
-        if (-not [string]::IsNullOrWhiteSpace($TekstCzas)) {
-            $TekstOdlegloscWyswietlana = if ($TekstOdlegloscWyswietlana) { "$TekstOdlegloscWyswietlana  ($TekstCzas)" } else { $TekstCzas }
+        $enableTop = if ($null -ne $OverlayConfig.EnableTopOverlay) { [bool]$OverlayConfig.EnableTopOverlay } else { $true }
+        $enableBtm = if ($null -ne $OverlayConfig.EnableBottomOverlay) { [bool]$OverlayConfig.EnableBottomOverlay } else { $true }
+
+        # Resolve data values
+        $addrStartGeo = if ($StartGeocoded) { $StartGeocoded } elseif ($TekstAdresA) { $TekstAdresA } else { '' }
+        $addrStartRaw = if ($StartRaw) { $StartRaw } else { '' }
+        $addrEndGeo   = if ($EndGeocoded) { $EndGeocoded } elseif ($TekstAdresB) { $TekstAdresB } else { '' }
+        $addrEndRaw   = if ($EndRaw) { $EndRaw } else { '' }
+
+        $nameVal = if ($RouteName) { $RouteName } elseif ($TekstNaglowekLewy) { $TekstNaglowekLewy } elseif ($Opis) { $Opis.Trim() } elseif ($TekstUmowa) { $TekstUmowa } else { '' }
+
+        $typeVal = if ($RouteType) { $RouteType } elseif ($TekstNaglowekPrawy) { $TekstNaglowekPrawy } elseif ($TekstKierunek) { $TekstKierunek } else { '' }
+        if ($typeVal -match '^(?:Type|Typ|Art):\s*(.+)$' -or $typeVal -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
+            $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
+            $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
+                       elseif ($rawVal -match '(?i)eco|eko|fuel') { 'Eco' }
+                       elseif ($rawVal -match '(?i)fast|szyb|schnell') { 'Fastest' }
+                       else { $rawVal }
+            $tPrefix = switch ($lang) { 'de' { 'Typ: ' } 'pl' { 'Typ: ' } default { 'Type: ' } }
+            $tName = switch ($lang) {
+                'de' { if ($normVal -eq 'Fastest') { 'Schnellste' } elseif ($normVal -eq 'Shortest') { 'Kürzeste' } elseif ($normVal -eq 'Eco') { 'Eco' } else { $normVal } }
+                'pl' { if ($normVal -eq 'Fastest') { 'Najszybsza' } elseif ($normVal -eq 'Shortest') { 'Najkrótsza' } elseif ($normVal -eq 'Eco') { 'Eko' } else { $normVal } }
+                default { $normVal }
+            }
+            $typeVal = "$tPrefix$tName"
         }
 
-        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) -or (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy))
-        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana))
+        $distPrefix = switch ($lang) { 'de' { 'Gesamt: ' } 'pl' { 'Razem: ' } default { 'Total: ' } }
+        $distVal = if ($TekstOdleglosc) { $TekstOdleglosc } else { '' }
+
+        $durVal = if ($TekstCzas) {
+            if ($TekstCzas -match '^\(.*\)$') { $TekstCzas } else { "($TekstCzas)" }
+        } else { '' }
+
+        $dateVal = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
+
+        $wpItems = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $rawWpList = if ($WaypointsList -and @($WaypointsList).Count -gt 0) {
+            $WaypointsList
+        } elseif ($RoutePoints -and @($RoutePoints).Count -gt 2) {
+            @($RoutePoints[1..($RoutePoints.Count - 2)])
+        } else { @() }
+
+        $wIdx = 1
+        foreach ($w in $rawWpList) {
+            $wText = if ($w -is [string]) { $w }
+                     elseif ($w.FormattedAddress) { $w.FormattedAddress }
+                     elseif ($w.Address) { $w.Address }
+                     else { '' }
+            if (-not [string]::IsNullOrWhiteSpace($wText)) {
+                $wpItems.Add([PSCustomObject]@{
+                    Index = $wIdx
+                    Badge = "${wIdx}: "
+                    Text  = $wText
+                })
+                $wIdx++
+            }
+        }
+
+        # Build active property items map
+        $propDataMap = @{
+            'StartGeocoded' = @{ Id='StartGeocoded'; Kind='address'; Badge='A: '; BadgeColor='Green'; Text=$addrStartGeo }
+            'StartRaw'      = @{ Id='StartRaw';      Kind='address'; Badge='A: '; BadgeColor='Green'; Text=$addrStartRaw }
+            'EndGeocoded'   = @{ Id='EndGeocoded';   Kind='address'; Badge='B: '; BadgeColor='Red';   Text=$addrEndGeo }
+            'EndRaw'        = @{ Id='EndRaw';        Kind='address'; Badge='B: '; BadgeColor='Red';   Text=$addrEndRaw }
+            'Distance'      = @{ Id='Distance';      Kind='stat';    Prefix=$distPrefix; Value=$distVal }
+            'Duration'      = @{ Id='Duration';      Kind='stat';    Value=$durVal }
+            'Timestamp'     = @{ Id='Timestamp';     Kind='date';    Text=$dateVal }
+            'RouteName'     = @{ Id='RouteName';     Kind='title';   Text=$nameVal }
+            'RouteType'     = @{ Id='RouteType';     Kind='type';    Text=$typeVal }
+            'Waypoints'     = @{ Id='Waypoints';     Kind='waypoints'; Items=$wpItems }
+        }
+
+        $topItems = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $btmItems = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        if ($OverlayConfig.Items) {
+            $propNames = if ($OverlayConfig.Items -is [System.Collections.IDictionary]) {
+                $OverlayConfig.Items.Keys
+            } else {
+                $OverlayConfig.Items.PSObject.Properties.Name
+            }
+            foreach ($pName in $propNames) {
+                $iCfg = if ($OverlayConfig.Items -is [System.Collections.IDictionary]) {
+                    $OverlayConfig.Items[$pName]
+                } else {
+                    $OverlayConfig.Items.$pName
+                }
+                if (-not $iCfg) { continue }
+                $pEnabled = if ($null -ne $iCfg.Enabled) { [bool]$iCfg.Enabled } else { $true }
+                $pPanel   = if ($iCfg.Panel) { [string]$iCfg.Panel } else { 'None' }
+                $pAlign   = if ($iCfg.Align) { [string]$iCfg.Align } else { 'Left' }
+                $pOrder   = if ($iCfg.Order) { [int]$iCfg.Order } else { 1 }
+
+                if (-not $pEnabled -or $pPanel -eq 'None') { continue }
+                if (-not $propDataMap.ContainsKey($pName)) { continue }
+
+                $pData = $propDataMap[$pName]
+                $hasContent = $false
+                if ($pData.Kind -eq 'waypoints') {
+                    $hasContent = ($pData.Items -and $pData.Items.Count -gt 0)
+                } elseif ($pData.Kind -eq 'stat') {
+                    $hasContent = (-not [string]::IsNullOrWhiteSpace($pData.Value))
+                } else {
+                    $hasContent = (-not [string]::IsNullOrWhiteSpace($pData.Text))
+                }
+                if (-not $hasContent) { continue }
+
+                $itemObj = [PSCustomObject]@{
+                    Id         = $pName
+                    Kind       = $pData.Kind
+                    Badge      = $pData.Badge
+                    BadgeColor = $pData.BadgeColor
+                    Text       = $pData.Text
+                    Prefix     = $pData.Prefix
+                    Value      = $pData.Value
+                    Items      = $pData.Items
+                    Panel      = $pPanel
+                    Align      = $pAlign
+                    Order      = $pOrder
+                }
+
+                if ($pPanel -eq 'Top' -and $enableTop) {
+                    $topItems.Add($itemObj)
+                } elseif ($pPanel -eq 'Bottom' -and $enableBtm) {
+                    $btmItems.Add($itemObj)
+                }
+            }
+        }
+
+        $MaTopOverlay = ($enableTop -and $topItems.Count -gt 0)
+        $MaBottomOverlay = ($enableBtm -and $btmItems.Count -gt 0)
 
         if ($MaTopOverlay -or $MaBottomOverlay) {
             try {
@@ -640,39 +760,104 @@ function Save-RouteMapPng {
                 $FontDist     = [System.Drawing.Font]::new('Segoe UI', 12.0, [System.Drawing.FontStyle]::Bold)
                 $FontDate     = [System.Drawing.Font]::new('Segoe UI', 8.5,  [System.Drawing.FontStyle]::Regular)
 
-                $TopBarH = if ($MaTopOverlay) { 38 } else { 0 }
+                $PadX  = 14
+                $LineH = 20
 
-                # Pre-measure bottom text lines using temporary Graphics
+                # Pre-measurement Graphics
                 $dummyBmp = [System.Drawing.Bitmap]::new(1, 1)
                 $measGfx  = [System.Drawing.Graphics]::FromImage($dummyBmp)
 
-                $PadX       = 14
-                $LineH      = 20
-                $LabelASize = $measGfx.MeasureString('A: ', $FontBadge)
-                $LabelBSize = $measGfx.MeasureString('B: ', $FontBadge)
-                $LabelMaxW  = [float][math]::Max($LabelASize.Width, $LabelBSize.Width)
-                $AvailW     = [float]($ActualW - ($PadX * 2))
-                $AddrMaxW   = [float]($AvailW - $LabelMaxW)
+                # Helper scriptblock to group items by Order
+                $BuildRows = {
+                    param($items)
+                    $orders = @($items | Select-Object -ExpandProperty Order -Unique | Sort-Object)
+                    $rows = [System.Collections.Generic.List[PSCustomObject]]::new()
+                    foreach ($ord in $orders) {
+                        $rowItems = @($items | Where-Object { $_.Order -eq $ord })
+                        $left   = [System.Collections.Generic.List[PSCustomObject]]::new()
+                        $center = [System.Collections.Generic.List[PSCustomObject]]::new()
+                        $right  = [System.Collections.Generic.List[PSCustomObject]]::new()
+                        foreach ($it in $rowItems) {
+                            if ($it.Align -eq 'Right') { $right.Add($it) }
+                            elseif ($it.Align -eq 'Center') { $center.Add($it) }
+                            else { $left.Add($it) }
+                        }
+                        $rows.Add([PSCustomObject]@{
+                            Order  = $ord
+                            Left   = $left
+                            Center = $center
+                            Right  = $right
+                            Height = 20
+                        })
+                    }
+                    return $rows.ToArray()
+                }
 
-                $LinesA = @(Get-WrappedLines -G $measGfx -Text $TekstAdresA -F $FontAddr -MaxW $AddrMaxW)
-                $LinesB = @(Get-WrappedLines -G $measGfx -Text $TekstAdresB -F $FontAddr -MaxW $AddrMaxW)
+                $topRows = @(if ($MaTopOverlay) { & $BuildRows $topItems } else { @() })
+                $btmRows = @(if ($MaBottomOverlay) { & $BuildRows $btmItems } else { @() })
+
+                # Measure row heights
+                $MeasureRows = {
+                    param($rows, $availWidth)
+                    foreach ($row in @($rows)) {
+                        $maxH = 20
+                        $allItems = @($row.Left) + @($row.Center) + @($row.Right)
+                        foreach ($it in $allItems) {
+                            if ($it.Kind -eq 'address') {
+                                $badgeSz = $measGfx.MeasureString($it.Badge, $FontBadge)
+                                $addrW = [float]($availWidth - $badgeSz.Width)
+                                $lines = @(Get-WrappedLines -G $measGfx -Text $it.Text -F $FontAddr -MaxW $addrW)
+                                $it | Add-Member -NotePropertyName 'WrappedLines' -NotePropertyValue $lines -Force
+                                $h = [math]::Max(1, $lines.Count) * $LineH
+                                if ($h -gt $maxH) { $maxH = $h }
+                            }
+                            elseif ($it.Kind -eq 'waypoints') {
+                                $totalWpH = 0
+                                foreach ($wp in $it.Items) {
+                                    $bSz = $measGfx.MeasureString($wp.Badge, $FontBadge)
+                                    $wpMaxW = [float]($availWidth - $bSz.Width)
+                                    $wpLines = @(Get-WrappedLines -G $measGfx -Text $wp.Text -F $FontAddr -MaxW $wpMaxW)
+                                    $wp | Add-Member -NotePropertyName 'WrappedLines' -NotePropertyValue $wpLines -Force
+                                    $totalWpH += [math]::Max(1, $wpLines.Count) * $LineH
+                                }
+                                if ($totalWpH -gt $maxH) { $maxH = $totalWpH }
+                            }
+                            elseif ($it.Kind -eq 'stat') {
+                                if ($maxH -lt 24) { $maxH = 24 }
+                            }
+                            elseif ($it.Kind -in @('title', 'type')) {
+                                if ($maxH -lt 22) { $maxH = 22 }
+                            }
+                        }
+                        $row.Height = $maxH
+                    }
+                }
+
+                $availContentW = [float]($ActualW - ($PadX * 2))
+                & $MeasureRows $topRows $availContentW
+                & $MeasureRows $btmRows $availContentW
+
                 $measGfx.Dispose()
                 $dummyBmp.Dispose()
 
-                $LinesACount = [math]::Max(1, $LinesA.Count)
-                $LinesBCount = [math]::Max(1, $LinesB.Count)
+                # Calculate banner heights
+                $TopPad = 8; $TopBotPad = 8; $TopRowSpacing = 4
+                $TopBarH = 0
+                if ($MaTopOverlay -and @($topRows).Count -gt 0) {
+                    $sumTopH = (@($topRows) | Measure-Object -Property Height -Sum).Sum
+                    if (-not $sumTopH) { $sumTopH = 20 }
+                    $TopBarH = [int]($TopPad + $sumTopH + ((@($topRows).Count - 1) * $TopRowSpacing) + $TopBotPad)
+                    if ($TopBarH -lt 38) { $TopBarH = 38 }
+                }
 
-                $BtmPadTop   = 10
-                $BtmPadBot   = 10
-                $SpacingAB   = 4
-                $SpacingDist = 8
-                $DistLineH   = 24
+                $BtmPadTop = 10; $BtmPadBot = 10; $BtmRowSpacing = 6
+                $BtmBarH = 0
+                if ($MaBottomOverlay -and @($btmRows).Count -gt 0) {
+                    $sumBtmH = (@($btmRows) | Measure-Object -Property Height -Sum).Sum
+                    if (-not $sumBtmH) { $sumBtmH = 20 }
+                    $BtmBarH = [int]($BtmPadTop + $sumBtmH + ((@($btmRows).Count - 1) * $BtmRowSpacing) + $BtmPadBot)
+                }
 
-                $BtmBarH = if ($MaBottomOverlay) {
-                    $BtmPadTop + ($LinesACount * $LineH) + $SpacingAB + ($LinesBCount * $LineH) + $SpacingDist + $DistLineH + $BtmPadBot
-                } else { 0 }
-
-                # Canvas extension: Map is preserved 100% in the middle with extra height on top and bottom
                 $FinalW = $ActualW
                 $FinalH = $ActualH + $TopBarH + $BtmBarH
 
@@ -681,14 +866,14 @@ function Save-RouteMapPng {
                 $Graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
                 $Graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
 
-                # 1. Fill solid background with dark slate #0F172A
+                # 1. Background fill
                 $BrushBg = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 15, 23, 42))
                 $Graphics.FillRectangle($BrushBg, 0, 0, $FinalW, $FinalH)
 
-                # 2. Draw map in the middle — untouched and 100% visible (no overlays covering map content)
+                # 2. Draw map image in the middle
                 $Graphics.DrawImage($BitmapSrc, 0, $TopBarH, $ActualW, $ActualH)
 
-                # 3. Separator lines and color brushes
+                # 3. Brushes & Pens
                 $PenSep      = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255, 51, 65, 85), 1.5)
                 $BrushWhite  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 248, 250, 252))
                 $BrushYellow = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 250, 204, 21))
@@ -697,66 +882,141 @@ function Save-RouteMapPng {
                 $BrushRed    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 239, 68, 68))
                 $BrushMuted  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 148, 163, 184))
 
-                # 4. Top Header Banner (Extended on top)
-                if ($MaTopOverlay) {
-                    $Graphics.DrawLine($PenSep, 0, $TopBarH, $FinalW, $TopBarH)
-                    $TopTextY = [float](($TopBarH - $FontTopTitle.Height) / 2)
-                    $CurLeftX = [float]$PadX
-
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-                        $Graphics.DrawString($TekstNaglowekLewy, $FontTopTitle, $BrushWhite, $CurLeftX, $TopTextY)
-                        $CurLeftX += $Graphics.MeasureString($TekstNaglowekLewy, $FontTopTitle).Width
+                # Helper scriptblock to measure width of an item
+                $MeasureItemWidth = {
+                    param($it)
+                    if ($it.Kind -eq 'address') {
+                        $bSz = $Graphics.MeasureString($it.Badge, $FontBadge)
+                        $tSz = $Graphics.MeasureString($it.Text, $FontAddr)
+                        return ($bSz.Width + $tSz.Width)
                     }
+                    elseif ($it.Kind -eq 'stat') {
+                        $w = 0
+                        if ($it.Prefix) { $w += $Graphics.MeasureString($it.Prefix, $FontDistLbl).Width }
+                        if ($it.Value)  { $w += $Graphics.MeasureString($it.Value, $FontDist).Width }
+                        return $w
+                    }
+                    elseif ($it.Kind -eq 'title') {
+                        return $Graphics.MeasureString($it.Text, $FontTopTitle).Width
+                    }
+                    elseif ($it.Kind -eq 'type') {
+                        return $Graphics.MeasureString($it.Text, $FontTopType).Width
+                    }
+                    elseif ($it.Kind -eq 'date') {
+                        return $Graphics.MeasureString($it.Text, $FontDate).Width
+                    }
+                    elseif ($it.Kind -eq 'waypoints') {
+                        return 200
+                    }
+                    return 0
+                }
 
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-                        $SizeR = $Graphics.MeasureString($TekstNaglowekPrawy, $FontTopType)
-                        $RightStartX = [float][math]::Max($CurLeftX + 15, $FinalW - $PadX - $SizeR.Width)
-                        $Graphics.DrawString($TekstNaglowekPrawy, $FontTopType, $BrushYellow, $RightStartX, $TopTextY)
+                # Helper scriptblock to draw an item at specified coordinates
+                $DrawItem = {
+                    param($it, [float]$x, [float]$y)
+                    if ($it.Kind -eq 'address') {
+                        $badgeBrush = if ($it.BadgeColor -eq 'Red') { $BrushRed } else { $BrushGreen }
+                        $Graphics.DrawString($it.Badge, $FontBadge, $badgeBrush, $x, $y)
+                        $bSz = $Graphics.MeasureString($it.Badge, $FontBadge)
+                        $curLineY = $y
+                        $lines = if ($it.WrappedLines) { $it.WrappedLines } else { @($it.Text) }
+                        foreach ($line in $lines) {
+                            $Graphics.DrawString($line, $FontAddr, $BrushWhite, ($x + $bSz.Width), $curLineY)
+                            $curLineY += [float]$LineH
+                        }
+                    }
+                    elseif ($it.Kind -eq 'waypoints') {
+                        $wpY = $y
+                        foreach ($wp in $it.Items) {
+                            $Graphics.DrawString($wp.Badge, $FontBadge, $BrushCyan, $x, $wpY)
+                            $bSz = $Graphics.MeasureString($wp.Badge, $FontBadge)
+                            $lines = if ($wp.WrappedLines) { $wp.WrappedLines } else { @($wp.Text) }
+                            foreach ($line in $lines) {
+                                $Graphics.DrawString($line, $FontAddr, $BrushWhite, ($x + $bSz.Width), $wpY)
+                                $wpY += [float]$LineH
+                            }
+                        }
+                    }
+                    elseif ($it.Kind -eq 'stat') {
+                        $statX = $x
+                        if ($it.Prefix) {
+                            $pSz = $Graphics.MeasureString($it.Prefix, $FontDistLbl)
+                            $Graphics.DrawString($it.Prefix, $FontDistLbl, $BrushCyan, $statX, ($y + 2))
+                            $statX += $pSz.Width
+                        }
+                        if ($it.Value) {
+                            $Graphics.DrawString($it.Value, $FontDist, $BrushYellow, $statX, $y)
+                        }
+                    }
+                    elseif ($it.Kind -eq 'title') {
+                        $Graphics.DrawString($it.Text, $FontTopTitle, $BrushWhite, $x, $y)
+                    }
+                    elseif ($it.Kind -eq 'type') {
+                        $Graphics.DrawString($it.Text, $FontTopType, $BrushYellow, $x, $y)
+                    }
+                    elseif ($it.Kind -eq 'date') {
+                        $Graphics.DrawString($it.Text, $FontDate, $BrushMuted, $x, ($y + 3))
                     }
                 }
 
-                # 5. Bottom Footer Banner (Extended on bottom, distance & time a line lower)
-                if ($MaBottomOverlay) {
+                # Helper scriptblock to render a banner's rows
+                $RenderBannerRows = {
+                    param($rows, [float]$startY, [float]$spacing)
+                    $curY = $startY
+                    foreach ($row in $rows) {
+                        $leftX = [float]$PadX
+
+                        # 1. Left items
+                        foreach ($it in $row.Left) {
+                            & $DrawItem $it $leftX $curY
+                            $w = & $MeasureItemWidth $it
+                            $leftX += [float]($w + 14)
+                        }
+
+                        # 2. Right items
+                        $totalRightW = 0
+                        foreach ($it in $row.Right) {
+                            $totalRightW += [float]((& $MeasureItemWidth $it) + 12)
+                        }
+                        $rightX = [float]($FinalW - $PadX - $totalRightW + 12)
+                        foreach ($it in $row.Right) {
+                            & $DrawItem $it $rightX $curY
+                            $w = & $MeasureItemWidth $it
+                            $rightX += [float]($w + 12)
+                        }
+
+                        # 3. Center items
+                        $totalCenterW = 0
+                        foreach ($it in $row.Center) {
+                            $totalCenterW += [float]((& $MeasureItemWidth $it) + 12)
+                        }
+                        $centerX = [float][math]::Max($leftX + 10, ($FinalW - $totalCenterW + 12) / 2)
+                        foreach ($it in $row.Center) {
+                            & $DrawItem $it $centerX $curY
+                            $w = & $MeasureItemWidth $it
+                            $centerX += [float]($w + 12)
+                        }
+
+                        $curY += [float]($row.Height + $spacing)
+                    }
+                }
+
+                # 4. Draw Top Header Banner
+                if ($MaTopOverlay -and $TopBarH -gt 0 -and @($topRows).Count -gt 0) {
+                    $Graphics.DrawLine($PenSep, 0, $TopBarH, $FinalW, $TopBarH)
+                    $topStartY = [float]$TopPad
+                    if (@($topRows).Count -eq 1) {
+                        $topStartY = [float][math]::Max(6, ($TopBarH - $topRows[0].Height) / 2)
+                    }
+                    & $RenderBannerRows $topRows $topStartY $TopRowSpacing
+                }
+
+                # 5. Draw Bottom Footer Banner
+                if ($MaBottomOverlay -and $BtmBarH -gt 0 -and @($btmRows).Count -gt 0) {
                     $BtmBarY = $TopBarH + $ActualH
                     $Graphics.DrawLine($PenSep, 0, $BtmBarY, $FinalW, $BtmBarY)
-
-                    $CurY = [float]($BtmBarY + $BtmPadTop)
-                    $LabelXOffset = [float]($PadX + $LabelMaxW)
-
-                    # Line 1: Origin [A]
-                    $Graphics.DrawString('A: ', $FontBadge, $BrushGreen, [float]$PadX, $CurY)
-                    foreach ($Line in $LinesA) {
-                        $Graphics.DrawString($Line, $FontAddr, $BrushWhite, $LabelXOffset, $CurY)
-                        $CurY += [float]$LineH
-                    }
-
-                    # Line 2: Destination [B]
-                    $CurY += [float]$SpacingAB
-                    $Graphics.DrawString('B: ', $FontBadge, $BrushRed, [float]$PadX, $CurY)
-                    foreach ($Line in $LinesB) {
-                        $Graphics.DrawString($Line, $FontAddr, $BrushWhite, $LabelXOffset, $CurY)
-                        $CurY += [float]$LineH
-                    }
-
-                    # Line 3: Distance and Duration A LINE LOWER (never overlaps with addresses)
-                    $CurY += [float]$SpacingDist
-                    if (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana)) {
-                        $distLblText = switch ($lang) {
-                            'de'    { "Gesamt: " }
-                            'pl'    { "Razem: " }
-                            default { "Total: " }
-                        }
-                        $distLblSize = $Graphics.MeasureString($distLblText, $FontDistLbl)
-                        $Graphics.DrawString($distLblText, $FontDistLbl, $BrushCyan, [float]$PadX, [float]($CurY + 2))
-                        $Graphics.DrawString($TekstOdlegloscWyswietlana, $FontDist, $BrushYellow, [float]($PadX + $distLblSize.Width), $CurY)
-                    }
-
-                    # Timestamp on Line 3 (Right aligned)
-                    $DateStr   = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
-                    $DateSizeF = $Graphics.MeasureString($DateStr, $FontDate)
-                    $DateX     = [float]($FinalW - $DateSizeF.Width - $PadX)
-                    $DateY     = [float]($CurY + 3)
-                    $Graphics.DrawString($DateStr, $FontDate, $BrushMuted, $DateX, $DateY)
+                    $btmStartY = [float]($BtmBarY + $BtmPadTop)
+                    & $RenderBannerRows $btmRows $btmStartY $BtmRowSpacing
                 }
 
                 # Dispose GDI+ objects
@@ -1307,8 +1567,31 @@ Write-AppLog "Środowisko: PowerShell $($PSVersionTable.PSVersion), OS: $([Syste
 Write-AppLog "Plik konfiguracji: $script:ConfigFile" "INFO"
 Write-AppLog "Plik dziennika zdarzeń (log): $script:LogFile" "INFO"
 
+$script:OverlayPropKeys = @('StartGeocoded', 'EndGeocoded', 'Distance', 'Duration', 'Timestamp', 'RouteName', 'RouteType', 'Waypoints', 'StartRaw', 'EndRaw')
+
+function Get-DefaultOverlayConfig {
+    return [ordered]@{
+        EnableTopOverlay    = $true
+        EnableBottomOverlay = $true
+        Items               = [ordered]@{
+            StartGeocoded = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 1 }
+            EndGeocoded   = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 2 }
+            Distance      = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 3 }
+            Duration      = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Center'; Order = 3 }
+            Timestamp     = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Right';  Order = 3 }
+            RouteName     = [ordered]@{ Enabled = $true;  Panel = 'Top';    Align = 'Left';   Order = 1 }
+            RouteType     = [ordered]@{ Enabled = $true;  Panel = 'Top';    Align = 'Right';  Order = 1 }
+            Waypoints     = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Align = 'Left';   Order = 2 }
+            StartRaw      = [ordered]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 1 }
+            EndRaw        = [ordered]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 2 }
+        }
+    }
+}
+
 function Load-AppConfig {
     $defaultResults = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'GoogleMapsRoutes\Results'
+    $defaultOverlay = Get-DefaultOverlayConfig
+
     $cfg = [PSCustomObject]@{
         ApiKey           = ''
         RememberApiKey   = $true
@@ -1320,6 +1603,7 @@ function Load-AppConfig {
         MapWidth         = 900
         MapHeight        = 600
         Language         = 'en'
+        OverlayConfig    = $defaultOverlay
     }
 
     if (Test-Path $script:ConfigFile) {
@@ -1352,6 +1636,33 @@ function Load-AppConfig {
             if ($raw.Language -is [string] -and -not [string]::IsNullOrWhiteSpace($raw.Language)) {
                 $cfg.Language = $raw.Language.Trim().ToLower()
             }
+
+            if ($raw.OverlayConfig) {
+                if ($null -ne $raw.OverlayConfig.EnableTopOverlay) {
+                    $defaultOverlay.EnableTopOverlay = [bool]$raw.OverlayConfig.EnableTopOverlay
+                }
+                if ($null -ne $raw.OverlayConfig.EnableBottomOverlay) {
+                    $defaultOverlay.EnableBottomOverlay = [bool]$raw.OverlayConfig.EnableBottomOverlay
+                }
+                if ($raw.OverlayConfig.Items) {
+                    foreach ($k in $script:OverlayPropKeys) {
+                        $rawItem = if ($raw.OverlayConfig.Items.PSObject.Properties[$k]) {
+                            $raw.OverlayConfig.Items.$k
+                        } elseif ($raw.OverlayConfig.Items[$k]) {
+                            $raw.OverlayConfig.Items[$k]
+                        } else { $null }
+
+                        if ($rawItem) {
+                            $en = if ($null -ne $rawItem.Enabled) { [bool]$rawItem.Enabled } else { $defaultOverlay.Items[$k].Enabled }
+                            $pn = if ($rawItem.Panel) { [string]$rawItem.Panel } else { $defaultOverlay.Items[$k].Panel }
+                            $al = if ($rawItem.Align) { [string]$rawItem.Align } else { $defaultOverlay.Items[$k].Align }
+                            $od = if ($rawItem.Order) { [int]$rawItem.Order } else { $defaultOverlay.Items[$k].Order }
+                            $defaultOverlay.Items[$k] = [ordered]@{ Enabled = $en; Panel = $pn; Align = $al; Order = $od }
+                        }
+                    }
+                }
+            }
+            $cfg.OverlayConfig = $defaultOverlay
         } catch { }
     }
 
@@ -1373,7 +1684,8 @@ function Save-AppConfig {
         [string]$DefaultEmission = 'GASOLINE',
         [int]$MapWidth = 900,
         [int]$MapHeight = 600,
-        [string]$Language = ''
+        [string]$Language = '',
+        [object]$OverlayConfig = $null
     )
     $encKey = ''
     if ($RememberApiKey -and -not [string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -1389,8 +1701,9 @@ function Save-AppConfig {
 
     $finalInputFolder = if ($LastInputFolder) { $LastInputFolder } elseif ($script:Config -and $script:Config.LastInputFolder) { $script:Config.LastInputFolder } else { '' }
     $finalInputPath   = if ($LastInputPath) { $LastInputPath } elseif ($script:Config -and $script:Config.LastInputPath) { $script:Config.LastInputPath } else { '' }
+    $finalLang        = if ($Language) { $Language } elseif ($script:Config -and $script:Config.Language) { $script:Config.Language } else { 'en' }
+    $finalOverlay     = if ($OverlayConfig) { $OverlayConfig } elseif ($script:Config -and $script:Config.OverlayConfig) { $script:Config.OverlayConfig } else { Get-DefaultOverlayConfig }
 
-    $finalLang = if ($Language) { $Language } elseif ($script:Config -and $script:Config.Language) { $script:Config.Language } else { 'en' }
     $cfg = [ordered]@{
         ApiKeyEncrypted  = $encKey
         RememberApiKey   = $RememberApiKey
@@ -1402,9 +1715,89 @@ function Save-AppConfig {
         MapWidth         = $MapWidth
         MapHeight        = $MapHeight
         Language         = $finalLang
+        OverlayConfig    = $finalOverlay
     }
-    $json = $cfg | ConvertTo-Json -Depth 4
+    $json = $cfg | ConvertTo-Json -Depth 6
     [System.IO.File]::WriteAllText($script:ConfigFile, $json, [System.Text.UTF8Encoding]::new($true))
+}
+
+function Get-CurrentOverlayConfig {
+    $topEn = if ($chkEnableTopOverlay) { [bool]$chkEnableTopOverlay.IsChecked } else { $true }
+    $btmEn = if ($chkEnableBottomOverlay) { [bool]$chkEnableBottomOverlay.IsChecked } else { $true }
+    $cfg = [ordered]@{
+        EnableTopOverlay    = $topEn
+        EnableBottomOverlay = $btmEn
+        Items               = [ordered]@{}
+    }
+    foreach ($key in $script:OverlayPropKeys) {
+        $chk  = Get-Variable -Name "chkProp_$key"  -ValueOnly -ErrorAction SilentlyContinue
+        $cmbP = Get-Variable -Name "cmbPanel_$key" -ValueOnly -ErrorAction SilentlyContinue
+        $cmbA = Get-Variable -Name "cmbAlign_$key" -ValueOnly -ErrorAction SilentlyContinue
+        $cmbO = Get-Variable -Name "cmbOrder_$key" -ValueOnly -ErrorAction SilentlyContinue
+
+        $enabled = if ($chk) { [bool]$chk.IsChecked } else { $true }
+        $panel   = if ($cmbP -and $cmbP.SelectedItem) { [string]$cmbP.SelectedItem.Tag } else { 'Bottom' }
+        $align   = if ($cmbA -and $cmbA.SelectedItem) { [string]$cmbA.SelectedItem.Tag } else { 'Left' }
+        $order   = if ($cmbO -and $cmbO.SelectedItem) { [int]$cmbO.SelectedItem.Tag } else { 1 }
+
+        $cfg.Items[$key] = [ordered]@{
+            Enabled = $enabled
+            Panel   = $panel
+            Align   = $align
+            Order   = $order
+        }
+    }
+    return $cfg
+}
+
+function Set-OverlayConfigUi($cfg) {
+    if (-not $cfg) { return }
+    if ($null -ne $cfg.EnableTopOverlay -and $chkEnableTopOverlay) {
+        $chkEnableTopOverlay.IsChecked = [bool]$cfg.EnableTopOverlay
+    }
+    if ($null -ne $cfg.EnableBottomOverlay -and $chkEnableBottomOverlay) {
+        $chkEnableBottomOverlay.IsChecked = [bool]$cfg.EnableBottomOverlay
+    }
+    if ($cfg.Items) {
+        foreach ($key in $script:OverlayPropKeys) {
+            $itemCfg = if ($cfg.Items.PSObject.Properties[$key]) {
+                $cfg.Items.$key
+            } elseif ($cfg.Items[$key]) {
+                $cfg.Items[$key]
+            } else { $null }
+
+            if (-not $itemCfg) { continue }
+
+            $chk  = Get-Variable -Name "chkProp_$key"  -ValueOnly -ErrorAction SilentlyContinue
+            $cmbP = Get-Variable -Name "cmbPanel_$key" -ValueOnly -ErrorAction SilentlyContinue
+            $cmbA = Get-Variable -Name "cmbAlign_$key" -ValueOnly -ErrorAction SilentlyContinue
+            $cmbO = Get-Variable -Name "cmbOrder_$key" -ValueOnly -ErrorAction SilentlyContinue
+
+            if ($chk -and $null -ne $itemCfg.Enabled) {
+                $chk.IsChecked = [bool]$itemCfg.Enabled
+            }
+            if ($cmbP -and $itemCfg.Panel) {
+                foreach ($opt in $cmbP.Items) {
+                    if ($opt.Tag -eq $itemCfg.Panel) { $cmbP.SelectedItem = $opt; break }
+                }
+            }
+            if ($cmbA -and $itemCfg.Align) {
+                foreach ($opt in $cmbA.Items) {
+                    if ($opt.Tag -eq $itemCfg.Align) { $cmbA.SelectedItem = $opt; break }
+                }
+            }
+            if ($cmbO -and $itemCfg.Order) {
+                foreach ($opt in $cmbO.Items) {
+                    if ([int]$opt.Tag -eq [int]$itemCfg.Order) { $cmbO.SelectedItem = $opt; break }
+                }
+            }
+        }
+    }
+}
+
+function Reset-OverlayConfigUi {
+    $defaultCfg = Get-DefaultOverlayConfig
+    Set-OverlayConfigUi $defaultCfg
 }
 
 $script:Config = Load-AppConfig
@@ -1462,7 +1855,7 @@ function New-WorkerPowerShell {
 # 6b. MANUAL CALC WORKER SCRIPTBLOCK (Isolated Runspace, Top-level)
 # ══════════════════════════════════════════════════════════════════════════════
 $script:ManualCalcAsync = {
-    param($start, $end, $waypoints, $routeType, $emission, $trafficAware, $name, $apiKey, $outDir, $logFile, $languageCode = 'en')
+    param($start, $end, $waypoints, $routeType, $emission, $trafficAware, $name, $apiKey, $outDir, $logFile, $languageCode = 'en', $overlayConfigJson = '')
 
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls
     Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
@@ -1546,7 +1939,11 @@ $script:ManualCalcAsync = {
             -TekstAdresA $geoStart.FormattedAddress -TekstAdresB $geoEnd.FormattedAddress `
             -TekstOdleglosc "$($trasa.OdlegloscKm) km" -TekstCzas "$($trasa.CzasMin) min" `
             -TekstNaglowekLewy $name -TekstNaglowekPrawy $headerRightText `
-            -LanguageCode $languageCode
+            -LanguageCode $languageCode `
+            -StartRaw $start -StartGeocoded $geoStart.FormattedAddress `
+            -EndRaw $end -EndGeocoded $geoEnd.FormattedAddress `
+            -WaypointsList $geoWp -RouteName $name -RouteType $headerRightText `
+            -OverlayConfig $overlayConfigJson
 
         & $wlog "Map rendering complete. Saved: $saved" "INFO"
 
@@ -1572,7 +1969,7 @@ $script:ManualCalcAsync = {
 # 6c. BATCH CALC WORKER SCRIPTBLOCK (Isolated Runspace, Top-level)
 # ══════════════════════════════════════════════════════════════════════════════
 $script:BatchCalcAsync = {
-    param($routes, $apiKey, $outDir, $defaultRouteType, $syncState, $logFile, $languageCode = 'en')
+    param($routes, $apiKey, $outDir, $defaultRouteType, $syncState, $logFile, $languageCode = 'en', $overlayConfigJson = '')
 
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls
     Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
@@ -1704,7 +2101,11 @@ $script:BatchCalcAsync = {
                 -TekstAdresA $geoStart.FormattedAddress -TekstAdresB $geoEnd.FormattedAddress `
                 -TekstOdleglosc "$($trasa.OdlegloscKm) km" -TekstCzas "$($trasa.CzasMin) min" `
                 -TekstNaglowekLewy $routeName -TekstNaglowekPrawy $hdrBatchRightText `
-                -LanguageCode $languageCode
+                -LanguageCode $languageCode `
+                -StartRaw $r.Start -StartGeocoded $geoStart.FormattedAddress `
+                -EndRaw $r.End -EndGeocoded $geoEnd.FormattedAddress `
+                -WaypointsList $geoWp -RouteName $routeName -RouteType $hdrBatchRightText `
+                -OverlayConfig $overlayConfigJson
 
             $resolvedMapPath = if ($saved -and (Test-Path $mapPath)) { $mapPath } else { $null }
 
@@ -2374,7 +2775,7 @@ $script:BatchCalcAsync = {
             <!-- TAB 3: SETTINGS & API KEY -->
             <TabItem Name="tabItemSettings" Header="⚙ Settings &amp; API Key">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
-                    <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                    <StackPanel MaxWidth="780" HorizontalAlignment="Left">
                         <Border Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Name="lblSettingsApiHeader" Text="Google Maps API Key" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC" Margin="0,0,0,8"/>
@@ -2438,6 +2839,305 @@ $script:BatchCalcAsync = {
                                     <TextBox Name="txtSettingsOutputDir"/>
                                     <Button Name="btnBrowseSettingsOutputDir" Grid.Column="1" Content="📂 Browse..." Background="#334155" Margin="6,0,0,0"/>
                                 </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- MAP OVERLAY CARD -->
+                        <Border Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Name="lblSettingsOverlayHeader" Text="Map Overlay &amp; Banners (Top / Bottom)" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC" Margin="0,0,0,6"/>
+                                <TextBlock Name="lblSettingsOverlayDesc" Text="Configure whether to display top and bottom banner panels, and choose which properties appear on each panel, line order, and alignment." FontSize="12" Foreground="#94A3B8" Margin="0,0,0,12" TextWrapping="Wrap"/>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                    <CheckBox Name="chkEnableTopOverlay" Content="Enable Top Banner" IsChecked="True" Foreground="#F8FAFC" FontSize="12" FontWeight="SemiBold" Margin="0,0,24,0"/>
+                                    <CheckBox Name="chkEnableBottomOverlay" Content="Enable Bottom Banner" IsChecked="True" Foreground="#F8FAFC" FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+
+                                <Border Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,10">
+                                    <Grid Name="gridOverlayConfig">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="220"/>
+                                            <ColumnDefinition Width="65"/>
+                                            <ColumnDefinition Width="135"/>
+                                            <ColumnDefinition Width="135"/>
+                                            <ColumnDefinition Width="110"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Header Row -->
+                                        <TextBlock Name="lblColPropName" Grid.Row="0" Grid.Column="0" Text="Property" FontWeight="Bold" Foreground="#94A3B8" FontSize="12" Margin="4,2,4,8"/>
+                                        <TextBlock Name="lblColPropShow" Grid.Row="0" Grid.Column="1" Text="Show" FontWeight="Bold" Foreground="#94A3B8" FontSize="12" Margin="4,2,4,8" HorizontalAlignment="Center"/>
+                                        <TextBlock Name="lblColPropPanel" Grid.Row="0" Grid.Column="2" Text="Panel" FontWeight="Bold" Foreground="#94A3B8" FontSize="12" Margin="4,2,4,8"/>
+                                        <TextBlock Name="lblColPropAlign" Grid.Row="0" Grid.Column="3" Text="Alignment" FontWeight="Bold" Foreground="#94A3B8" FontSize="12" Margin="4,2,4,8"/>
+                                        <TextBlock Name="lblColPropOrder" Grid.Row="0" Grid.Column="4" Text="Line / Order" FontWeight="Bold" Foreground="#94A3B8" FontSize="12" Margin="4,2,4,8" HorizontalAlignment="Center"/>
+
+                                        <!-- Row 1: StartGeocoded -->
+                                        <TextBlock Name="lblProp_StartGeocoded" Grid.Row="1" Grid.Column="0" Text="Start Address (Geocoded)" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_StartGeocoded" Grid.Row="1" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_StartGeocoded" Grid.Row="1" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_StartGeocoded" Grid.Row="1" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_StartGeocoded" Grid.Row="1" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1" IsSelected="True"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 2: EndGeocoded -->
+                                        <TextBlock Name="lblProp_EndGeocoded" Grid.Row="2" Grid.Column="0" Text="End Address (Geocoded)" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_EndGeocoded" Grid.Row="2" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_EndGeocoded" Grid.Row="2" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_EndGeocoded" Grid.Row="2" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_EndGeocoded" Grid.Row="2" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2" IsSelected="True"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 3: Distance -->
+                                        <TextBlock Name="lblProp_Distance" Grid.Row="3" Grid.Column="0" Text="Total Distance" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_Distance" Grid.Row="3" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_Distance" Grid.Row="3" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_Distance" Grid.Row="3" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_Distance" Grid.Row="3" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3" IsSelected="True"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 4: Duration -->
+                                        <TextBlock Name="lblProp_Duration" Grid.Row="4" Grid.Column="0" Text="Total Time" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_Duration" Grid.Row="4" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_Duration" Grid.Row="4" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_Duration" Grid.Row="4" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left"/>
+                                            <ComboBoxItem Content="Center" Tag="Center" IsSelected="True"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_Duration" Grid.Row="4" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3" IsSelected="True"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 5: Timestamp -->
+                                        <TextBlock Name="lblProp_Timestamp" Grid.Row="5" Grid.Column="0" Text="Generation Timestamp" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_Timestamp" Grid.Row="5" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_Timestamp" Grid.Row="5" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_Timestamp" Grid.Row="5" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right" IsSelected="True"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_Timestamp" Grid.Row="5" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3" IsSelected="True"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 6: RouteName -->
+                                        <TextBlock Name="lblProp_RouteName" Grid.Row="6" Grid.Column="0" Text="Route Name" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_RouteName" Grid.Row="6" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_RouteName" Grid.Row="6" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom"/>
+                                            <ComboBoxItem Content="Top" Tag="Top" IsSelected="True"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_RouteName" Grid.Row="6" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_RouteName" Grid.Row="6" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1" IsSelected="True"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 7: RouteType -->
+                                        <TextBlock Name="lblProp_RouteType" Grid.Row="7" Grid.Column="0" Text="Route Type" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_RouteType" Grid.Row="7" Grid.Column="1" IsChecked="True" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_RouteType" Grid.Row="7" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom"/>
+                                            <ComboBoxItem Content="Top" Tag="Top" IsSelected="True"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_RouteType" Grid.Row="7" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right" IsSelected="True"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_RouteType" Grid.Row="7" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1" IsSelected="True"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 8: Waypoints -->
+                                        <TextBlock Name="lblProp_Waypoints" Grid.Row="8" Grid.Column="0" Text="Intermediate Stops (Waypoints)" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_Waypoints" Grid.Row="8" Grid.Column="1" IsChecked="False" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_Waypoints" Grid.Row="8" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_Waypoints" Grid.Row="8" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_Waypoints" Grid.Row="8" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2" IsSelected="True"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 9: StartRaw -->
+                                        <TextBlock Name="lblProp_StartRaw" Grid.Row="9" Grid.Column="0" Text="Start Address (Raw Input)" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_StartRaw" Grid.Row="9" Grid.Column="1" IsChecked="False" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_StartRaw" Grid.Row="9" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None" IsSelected="True"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_StartRaw" Grid.Row="9" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_StartRaw" Grid.Row="9" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1" IsSelected="True"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 10: EndRaw -->
+                                        <TextBlock Name="lblProp_EndRaw" Grid.Row="10" Grid.Column="0" Text="End Address (Raw Input)" Foreground="#F8FAFC" FontSize="12" VerticalAlignment="Center" Margin="4,4"/>
+                                        <CheckBox Name="chkProp_EndRaw" Grid.Row="10" Grid.Column="1" IsChecked="False" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ComboBox Name="cmbPanel_EndRaw" Grid.Row="10" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                            <ComboBoxItem Content="None" Tag="None" IsSelected="True"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_EndRaw" Grid.Row="10" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_EndRaw" Grid.Row="10" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2" IsSelected="True"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+                                    </Grid>
+                                </Border>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <Button Name="btnResetOverlayConfig" Content="🔄 Reset to Default Layout" Background="#334155" Foreground="#F8FAFC" Padding="12,6"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 
@@ -2598,6 +3298,26 @@ $lblSettingsLangLabel       = $window.FindName('lblSettingsLangLabel')
 $cmbSettingsLanguage        = $window.FindName('cmbSettingsLanguage')
 $btnOpenLangFile            = $window.FindName('btnOpenLangFile')
 $btnReloadLang              = $window.FindName('btnReloadLang')
+
+# Tab 3: Overlay Settings
+$lblSettingsOverlayHeader    = $window.FindName('lblSettingsOverlayHeader')
+$lblSettingsOverlayDesc      = $window.FindName('lblSettingsOverlayDesc')
+$chkEnableTopOverlay         = $window.FindName('chkEnableTopOverlay')
+$chkEnableBottomOverlay      = $window.FindName('chkEnableBottomOverlay')
+$lblColPropName              = $window.FindName('lblColPropName')
+$lblColPropShow              = $window.FindName('lblColPropShow')
+$lblColPropPanel             = $window.FindName('lblColPropPanel')
+$lblColPropAlign             = $window.FindName('lblColPropAlign')
+$lblColPropOrder             = $window.FindName('lblColPropOrder')
+$btnResetOverlayConfig       = $window.FindName('btnResetOverlayConfig')
+
+foreach ($key in $script:OverlayPropKeys) {
+    Set-Variable -Name "lblProp_$key"  -Value ($window.FindName("lblProp_$key"))  -Scope Script
+    Set-Variable -Name "chkProp_$key"  -Value ($window.FindName("chkProp_$key"))  -Scope Script
+    Set-Variable -Name "cmbPanel_$key" -Value ($window.FindName("cmbPanel_$key")) -Scope Script
+    Set-Variable -Name "cmbAlign_$key" -Value ($window.FindName("cmbAlign_$key")) -Scope Script
+    Set-Variable -Name "cmbOrder_$key" -Value ($window.FindName("cmbOrder_$key")) -Scope Script
+}
 
 # ── 10. System wielojęzyczności i funkcje pomocnicze stanu UI ─────────────────
 
@@ -2761,6 +3481,24 @@ function Apply-AppLanguage {
     if ($lblSettingsDefaultMapSize) { $lblSettingsDefaultMapSize.Text = (Get-LocText 'SettingsDefaultMapSize') }
     if ($lblSettingsOutputDir) { $lblSettingsOutputDir.Text = (Get-LocText 'SettingsOutputDir') }
     if ($btnBrowseSettingsOutputDir) { $btnBrowseSettingsOutputDir.Content = (Get-LocText 'SettingsBtnBrowseOutputDir') }
+    if ($lblSettingsOverlayHeader) { $lblSettingsOverlayHeader.Text = (Get-LocText 'SettingsHeaderOverlay') }
+    if ($lblSettingsOverlayDesc) { $lblSettingsOverlayDesc.Text = (Get-LocText 'SettingsOverlayDesc') }
+    if ($chkEnableTopOverlay) { $chkEnableTopOverlay.Content = (Get-LocText 'SettingsOverlayTopEnable') }
+    if ($chkEnableBottomOverlay) { $chkEnableBottomOverlay.Content = (Get-LocText 'SettingsOverlayBottomEnable') }
+    if ($lblColPropName) { $lblColPropName.Text = (Get-LocText 'OverlayColProperty') }
+    if ($lblColPropShow) { $lblColPropShow.Text = (Get-LocText 'OverlayColShow') }
+    if ($lblColPropPanel) { $lblColPropPanel.Text = (Get-LocText 'OverlayColPanel') }
+    if ($lblColPropAlign) { $lblColPropAlign.Text = (Get-LocText 'OverlayColAlign') }
+    if ($lblColPropOrder) { $lblColPropOrder.Text = (Get-LocText 'OverlayColOrder') }
+    if ($btnResetOverlayConfig) { $btnResetOverlayConfig.Content = (Get-LocText 'SettingsOverlayBtnReset') }
+
+    foreach ($k in $script:OverlayPropKeys) {
+        $lblCtrl = Get-Variable -Name "lblProp_$k" -ValueOnly -ErrorAction SilentlyContinue
+        if ($lblCtrl) {
+            $lblCtrl.Text = (Get-LocText "OverlayProp$k")
+        }
+    }
+
     if ($lblSettingsLangHeader) { $lblSettingsLangHeader.Text = (Get-LocText 'SettingsHeaderLanguage') }
     if ($lblSettingsLangLabel) { $lblSettingsLangLabel.Text = (Get-LocText 'SettingsLanguageLabel') }
     if ($btnOpenLangFile) { $btnOpenLangFile.Content = (Get-LocText 'SettingsBtnOpenLangFile') }
@@ -2834,6 +3572,13 @@ foreach ($item in $cmbDefaultEmission.Items) {
 $targetMapTag = "$($script:Config.MapWidth)x$($script:Config.MapHeight)"
 foreach ($item in $cmbDefaultMapSize.Items) {
     if ($item.Tag -eq $targetMapTag) { $item.IsSelected = $true; break }
+}
+
+# Ustawienie kontrolek nakładki mapy (Overlay)
+if ($script:Config.OverlayConfig) {
+    Set-OverlayConfigUi $script:Config.OverlayConfig
+} else {
+    Reset-OverlayConfigUi
 }
 
 $script:LastGeneratedMapPath = $null
@@ -2986,15 +3731,18 @@ $btnTestApiKey.Add_Click({
     $testTimer.Interval = [TimeSpan]::FromMilliseconds(100)
     $script:ActiveTestTimer = $testTimer
     $script:ActiveTestPs = $psTest
-    $ticks = 0
+    $script:ActiveTestHandle = $testHandle
+    $script:TestTimerTicks = 0
 
     $testTimer.Add_Tick({
-        $ticks++
-        if ($testHandle.IsCompleted) {
-            $testTimer.Stop()
+        $localTestHandle = $script:ActiveTestHandle
+        $localTestPs     = $script:ActiveTestPs
+        $script:TestTimerTicks++
+        if ($localTestHandle -and $localTestHandle.IsCompleted) {
+            if ($script:ActiveTestTimer) { try { $script:ActiveTestTimer.Stop() } catch { } }
             $btnTestApiKey.IsEnabled = $true
             try {
-                $res = $psTest.EndInvoke($testHandle)
+                $res = $localTestPs.EndInvoke($localTestHandle)
                 $testResult = $res[0]
                 $isValid = [bool]$testResult.Valid
                 $msg = [string]$testResult.Message
@@ -3008,15 +3756,15 @@ $btnTestApiKey.Add_Click({
                 Write-AppLog "Exception while retrieving API test result: $($_.Exception.ToString())" "ERROR"
             }
             finally {
-                $psTest.Dispose()
+                $localTestPs.Dispose()
             }
         }
-        elseif ($ticks -ge 200) { # 20s timeout limit
-            $testTimer.Stop()
+        elseif ($script:TestTimerTicks -ge 200) { # 20s timeout limit
+            if ($script:ActiveTestTimer) { try { $script:ActiveTestTimer.Stop() } catch { } }
             $btnTestApiKey.IsEnabled = $true
             Update-ApiStatusBadge -IsValid $false -Message "Google API response timeout (20s)."
             Write-AppLog "API key test timeout (20s watchdog timeout)." "WARN"
-            try { $psTest.Stop(); $psTest.Dispose() } catch { }
+            try { $localTestPs.Stop(); $localTestPs.Dispose() } catch { }
         }
     })
     $testTimer.Start()
@@ -3042,9 +3790,12 @@ $btnSaveSettings.Add_Click({
     $mapH = [int]$dims[1]
 
     $langToSave = if ($cmbSettingsLanguage.SelectedItem) { [string]$cmbSettingsLanguage.SelectedItem.Tag } else { $script:CurrentLanguage }
+    $overlayCfg = Get-CurrentOverlayConfig
     Save-AppConfig -ApiKey $key -RememberApiKey $remember -OutputFolder $outDir `
         -LastInputFolder $script:Config.LastInputFolder -LastInputPath $script:Config.LastInputPath `
-        -DefaultRouteType $routeType -DefaultEmission $emission -MapWidth $mapW -MapHeight $mapH -Language $langToSave
+        -DefaultRouteType $routeType -DefaultEmission $emission -MapWidth $mapW -MapHeight $mapH -Language $langToSave `
+        -OverlayConfig $overlayCfg
+    $script:Config.OverlayConfig = $overlayCfg
 
     Set-CurrentApiKey -Key $key
     if ($remember -and -not [string]::IsNullOrWhiteSpace($key)) {
@@ -3062,6 +3813,12 @@ $btnSaveSettings.Add_Click({
 
     [System.Windows.MessageBox]::Show((Get-LocText 'MsgSettingsSaved'), (Get-LocText 'MsgSettingsSavedTitle'), 'OK', 'Information')
 })
+
+if ($btnResetOverlayConfig) {
+    $btnResetOverlayConfig.Add_Click({
+        Reset-OverlayConfigUi
+    })
+}
 
 # ── 12. Zdarzenia: Tab 1 (Manual Input) ───────────────────────────────────────
 $btnClearManualStart.Add_Click({ $txtManualStart.Clear() })
@@ -3170,7 +3927,8 @@ $btnCalculateManual.Add_Click({
 
     # $script:ManualCalcAsync is defined at top-level (section 6b) — used directly below
     $psCmd = New-WorkerPowerShell -ScriptBlock $script:ManualCalcAsync
-    $psCmd.AddArgument($start).AddArgument($end).AddArgument($waypoints).AddArgument($routeType).AddArgument($emission).AddArgument($trafficAware).AddArgument($name).AddArgument($apiKey).AddArgument($outDir).AddArgument($script:LogFile).AddArgument($script:CurrentGoogleLang) | Out-Null
+    $overlayCfgJson = (Get-CurrentOverlayConfig | ConvertTo-Json -Depth 6 -Compress)
+    $psCmd.AddArgument($start).AddArgument($end).AddArgument($waypoints).AddArgument($routeType).AddArgument($emission).AddArgument($trafficAware).AddArgument($name).AddArgument($apiKey).AddArgument($outDir).AddArgument($script:LogFile).AddArgument($script:CurrentGoogleLang).AddArgument($overlayCfgJson) | Out-Null
 
     try {
         $asyncHandle = $psCmd.BeginInvoke()
@@ -3195,9 +3953,9 @@ $btnCalculateManual.Add_Click({
     $timer.Interval = [TimeSpan]::FromMilliseconds(150)
     $script:ActiveManualTimer = $timer
     $script:ActiveManualPs = $psCmd
-    $ticks = 0
-
     $script:ActiveManualAsyncHandle = $asyncHandle
+    $script:ManualTimerTicks = 0
+
     Write-AppLog "Worker started (BeginInvoke). IsCompleted=$($asyncHandle.IsCompleted)" "INFO"
 
     $timer.Add_Tick({
@@ -3205,7 +3963,7 @@ $btnCalculateManual.Add_Click({
         $localPs     = $script:ActiveManualPs
         $script:ManualTimerTicks++
         if ($localHandle -and $localHandle.IsCompleted) {
-            $timer.Stop()
+            if ($script:ActiveManualTimer) { try { $script:ActiveManualTimer.Stop() } catch { } }
             $btnCalculateManual.IsEnabled = $true
             $btnCalculateManual.Content = '🚀 CALCULATE ROUTE & DOWNLOAD MAP'
 
@@ -3271,7 +4029,7 @@ $btnCalculateManual.Add_Click({
             }
         }
         elseif ($script:ManualTimerTicks -ge 400) { # 60 seconds watchdog timeout
-            $timer.Stop()
+            if ($script:ActiveManualTimer) { try { $script:ActiveManualTimer.Stop() } catch { } }
             $btnCalculateManual.IsEnabled = $true
             $btnCalculateManual.Content = '🚀 CALCULATE ROUTE & DOWNLOAD MAP'
             $lblManualStatus.Text = '✕ Timeout (60s)'
@@ -3282,7 +4040,6 @@ $btnCalculateManual.Add_Click({
         }
     })
     $timer.Start()
-    $script:ManualTimerTicks = 0
 })
 
 $btnOpenGoogleMaps.Add_Click({
@@ -3571,7 +4328,8 @@ $btnStartBatch.Add_Click({
 
     try {
         $psCmdBatch = New-WorkerPowerShell -ScriptBlock $script:BatchCalcAsync
-        $psCmdBatch.AddArgument($routesToProcess).AddArgument($apiKey).AddArgument($outDir).AddArgument($defaultRouteType).AddArgument($syncState).AddArgument($script:LogFile).AddArgument($script:CurrentGoogleLang) | Out-Null
+        $overlayCfgJson = (Get-CurrentOverlayConfig | ConvertTo-Json -Depth 6 -Compress)
+        $psCmdBatch.AddArgument($routesToProcess).AddArgument($apiKey).AddArgument($outDir).AddArgument($defaultRouteType).AddArgument($syncState).AddArgument($script:LogFile).AddArgument($script:CurrentGoogleLang).AddArgument($overlayCfgJson) | Out-Null
         $asyncBatchHandle = $psCmdBatch.BeginInvoke()
     }
     catch {

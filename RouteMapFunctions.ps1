@@ -524,7 +524,15 @@ function Save-RouteMapPng {
         [Parameter()][string]$TekstKierunek = '',
         [Parameter()][string]$Opis = '',
         [Parameter()][string]$DataWygenerowania = '',
-        [Parameter()][string]$LanguageCode = 'en'
+        [Parameter()][string]$LanguageCode = 'en',
+        [Parameter()][string]$StartRaw = '',
+        [Parameter()][string]$StartGeocoded = '',
+        [Parameter()][string]$EndRaw = '',
+        [Parameter()][string]$EndGeocoded = '',
+        [Parameter()][object[]]$WaypointsList = @(),
+        [Parameter()][string]$RouteName = '',
+        [Parameter()][string]$RouteType = '',
+        [Parameter()][object]$OverlayConfig = $null
     )
 
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls
@@ -588,49 +596,161 @@ function Save-RouteMapPng {
             $wc.Dispose()
         }
 
-        # Header Left: Description / Title / Contract
-        if ([string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-            if (-not [string]::IsNullOrWhiteSpace($Opis)) {
-                $TekstNaglowekLewy = $Opis.Trim()
-            } elseif (-not [string]::IsNullOrWhiteSpace($TekstUmowa)) {
-                $TekstNaglowekLewy = if ($TekstUmowa -match '^(numer\s*umowy|contract|umowa|nr\s*umowy):') { $TekstUmowa } else { "Contract: $TekstUmowa" }
-            }
+        # Resolve overlay configuration
+        if ($OverlayConfig -is [string] -and -not [string]::IsNullOrWhiteSpace($OverlayConfig)) {
+            try { $OverlayConfig = $OverlayConfig | ConvertFrom-Json } catch { }
         }
-
-        # Header Right: Direction / Route Type / Date
-        if ([string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-            if (-not [string]::IsNullOrWhiteSpace($TekstKierunek)) {
-                $prefixDir = switch ($lang) { 'de' { 'Richtung: ' } 'pl' { 'Kierunek: ' } default { 'Direction: ' } }
-                $TekstNaglowekPrawy = if ($TekstKierunek -match '^(kierunek|direction|route|trasa|richtung):') { $TekstKierunek } else { "$prefixDir$TekstKierunek" }
-            }
-        }
-        else {
-            # Localize passed Type / Typ string according to $LanguageCode
-            if ($TekstNaglowekPrawy -match '^(?:Type|Typ|Art):\s*(.+)$' -or $TekstNaglowekPrawy -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
-                $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
-                $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
-                           elseif ($rawVal -match '(?i)eco|eko|fuel') { 'Eco' }
-                           elseif ($rawVal -match '(?i)fast|szyb|schnell') { 'Fastest' }
-                           else { $rawVal }
-
-                $tPrefix = switch ($lang) { 'de' { 'Typ: ' } 'pl' { 'Typ: ' } default { 'Type: ' } }
-                $tName = switch ($lang) {
-                    'de' { if ($normVal -eq 'Fastest') { 'Schnellste' } elseif ($normVal -eq 'Shortest') { 'Kürzeste' } elseif ($normVal -eq 'Eco') { 'Eco' } else { $normVal } }
-                    'pl' { if ($normVal -eq 'Fastest') { 'Najszybsza' } elseif ($normVal -eq 'Shortest') { 'Najkrótsza' } elseif ($normVal -eq 'Eco') { 'Eko' } else { $normVal } }
-                    default { $normVal }
+        if (-not $OverlayConfig) {
+            $OverlayConfig = [PSCustomObject]@{
+                EnableTopOverlay    = $true
+                EnableBottomOverlay = $true
+                Items               = [PSCustomObject]@{
+                    StartGeocoded = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 1 }
+                    EndGeocoded   = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 2 }
+                    Distance      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 3 }
+                    Duration      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Center'; Order = 3 }
+                    Timestamp     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Right';  Order = 3 }
+                    RouteName     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Align = 'Left';   Order = 1 }
+                    RouteType     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Align = 'Right';  Order = 1 }
+                    Waypoints     = [PSCustomObject]@{ Enabled = $false; Panel = 'Bottom'; Align = 'Left';   Order = 2 }
+                    StartRaw      = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 1 }
+                    EndRaw        = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 2 }
                 }
-                $TekstNaglowekPrawy = "$tPrefix$tName"
             }
         }
 
-        # Format distance and duration string
-        $TekstOdlegloscWyswietlana = $TekstOdleglosc
-        if (-not [string]::IsNullOrWhiteSpace($TekstCzas)) {
-            $TekstOdlegloscWyswietlana = if ($TekstOdlegloscWyswietlana) { "$TekstOdlegloscWyswietlana  ($TekstCzas)" } else { $TekstCzas }
+        $enableTop = if ($null -ne $OverlayConfig.EnableTopOverlay) { [bool]$OverlayConfig.EnableTopOverlay } else { $true }
+        $enableBtm = if ($null -ne $OverlayConfig.EnableBottomOverlay) { [bool]$OverlayConfig.EnableBottomOverlay } else { $true }
+
+        # Resolve data values
+        $addrStartGeo = if ($StartGeocoded) { $StartGeocoded } elseif ($TekstAdresA) { $TekstAdresA } else { '' }
+        $addrStartRaw = if ($StartRaw) { $StartRaw } else { '' }
+        $addrEndGeo   = if ($EndGeocoded) { $EndGeocoded } elseif ($TekstAdresB) { $TekstAdresB } else { '' }
+        $addrEndRaw   = if ($EndRaw) { $EndRaw } else { '' }
+
+        $nameVal = if ($RouteName) { $RouteName } elseif ($TekstNaglowekLewy) { $TekstNaglowekLewy } elseif ($Opis) { $Opis.Trim() } elseif ($TekstUmowa) { $TekstUmowa } else { '' }
+
+        $typeVal = if ($RouteType) { $RouteType } elseif ($TekstNaglowekPrawy) { $TekstNaglowekPrawy } elseif ($TekstKierunek) { $TekstKierunek } else { '' }
+        if ($typeVal -match '^(?:Type|Typ|Art):\s*(.+)$' -or $typeVal -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
+            $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
+            $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
+                       elseif ($rawVal -match '(?i)eco|eko|fuel') { 'Eco' }
+                       elseif ($rawVal -match '(?i)fast|szyb|schnell') { 'Fastest' }
+                       else { $rawVal }
+            $tPrefix = switch ($lang) { 'de' { 'Typ: ' } 'pl' { 'Typ: ' } default { 'Type: ' } }
+            $tName = switch ($lang) {
+                'de' { if ($normVal -eq 'Fastest') { 'Schnellste' } elseif ($normVal -eq 'Shortest') { 'Kürzeste' } elseif ($normVal -eq 'Eco') { 'Eco' } else { $normVal } }
+                'pl' { if ($normVal -eq 'Fastest') { 'Najszybsza' } elseif ($normVal -eq 'Shortest') { 'Najkrótsza' } elseif ($normVal -eq 'Eco') { 'Eko' } else { $normVal } }
+                default { $normVal }
+            }
+            $typeVal = "$tPrefix$tName"
         }
 
-        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) -or (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy))
-        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana))
+        $distPrefix = switch ($lang) { 'de' { 'Gesamt: ' } 'pl' { 'Razem: ' } default { 'Total: ' } }
+        $distVal = if ($TekstOdleglosc) { $TekstOdleglosc } else { '' }
+
+        $durVal = if ($TekstCzas) {
+            if ($TekstCzas -match '^\(.*\)$') { $TekstCzas } else { "($TekstCzas)" }
+        } else { '' }
+
+        $dateVal = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
+
+        $wpItems = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $rawWpList = if ($WaypointsList -and @($WaypointsList).Count -gt 0) {
+            $WaypointsList
+        } elseif ($RoutePoints -and @($RoutePoints).Count -gt 2) {
+            @($RoutePoints[1..($RoutePoints.Count - 2)])
+        } else { @() }
+
+        $wIdx = 1
+        foreach ($w in $rawWpList) {
+            $wText = if ($w -is [string]) { $w }
+                     elseif ($w.FormattedAddress) { $w.FormattedAddress }
+                     elseif ($w.Address) { $w.Address }
+                     else { '' }
+            if (-not [string]::IsNullOrWhiteSpace($wText)) {
+                $wpItems.Add([PSCustomObject]@{
+                    Index = $wIdx
+                    Badge = "${wIdx}: "
+                    Text  = $wText
+                })
+                $wIdx++
+            }
+        }
+
+        # Build active property items map
+        $propDataMap = @{
+            'StartGeocoded' = @{ Id='StartGeocoded'; Kind='address'; Badge='A: '; BadgeColor='Green'; Text=$addrStartGeo }
+            'StartRaw'      = @{ Id='StartRaw';      Kind='address'; Badge='A: '; BadgeColor='Green'; Text=$addrStartRaw }
+            'EndGeocoded'   = @{ Id='EndGeocoded';   Kind='address'; Badge='B: '; BadgeColor='Red';   Text=$addrEndGeo }
+            'EndRaw'        = @{ Id='EndRaw';        Kind='address'; Badge='B: '; BadgeColor='Red';   Text=$addrEndRaw }
+            'Distance'      = @{ Id='Distance';      Kind='stat';    Prefix=$distPrefix; Value=$distVal }
+            'Duration'      = @{ Id='Duration';      Kind='stat';    Value=$durVal }
+            'Timestamp'     = @{ Id='Timestamp';     Kind='date';    Text=$dateVal }
+            'RouteName'     = @{ Id='RouteName';     Kind='title';   Text=$nameVal }
+            'RouteType'     = @{ Id='RouteType';     Kind='type';    Text=$typeVal }
+            'Waypoints'     = @{ Id='Waypoints';     Kind='waypoints'; Items=$wpItems }
+        }
+
+        $topItems = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $btmItems = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        if ($OverlayConfig.Items) {
+            $propNames = if ($OverlayConfig.Items -is [System.Collections.IDictionary]) {
+                $OverlayConfig.Items.Keys
+            } else {
+                $OverlayConfig.Items.PSObject.Properties.Name
+            }
+            foreach ($pName in $propNames) {
+                $iCfg = if ($OverlayConfig.Items -is [System.Collections.IDictionary]) {
+                    $OverlayConfig.Items[$pName]
+                } else {
+                    $OverlayConfig.Items.$pName
+                }
+                if (-not $iCfg) { continue }
+                $pEnabled = if ($null -ne $iCfg.Enabled) { [bool]$iCfg.Enabled } else { $true }
+                $pPanel   = if ($iCfg.Panel) { [string]$iCfg.Panel } else { 'None' }
+                $pAlign   = if ($iCfg.Align) { [string]$iCfg.Align } else { 'Left' }
+                $pOrder   = if ($iCfg.Order) { [int]$iCfg.Order } else { 1 }
+
+                if (-not $pEnabled -or $pPanel -eq 'None') { continue }
+                if (-not $propDataMap.ContainsKey($pName)) { continue }
+
+                $pData = $propDataMap[$pName]
+                $hasContent = $false
+                if ($pData.Kind -eq 'waypoints') {
+                    $hasContent = ($pData.Items -and $pData.Items.Count -gt 0)
+                } elseif ($pData.Kind -eq 'stat') {
+                    $hasContent = (-not [string]::IsNullOrWhiteSpace($pData.Value))
+                } else {
+                    $hasContent = (-not [string]::IsNullOrWhiteSpace($pData.Text))
+                }
+                if (-not $hasContent) { continue }
+
+                $itemObj = [PSCustomObject]@{
+                    Id         = $pName
+                    Kind       = $pData.Kind
+                    Badge      = $pData.Badge
+                    BadgeColor = $pData.BadgeColor
+                    Text       = $pData.Text
+                    Prefix     = $pData.Prefix
+                    Value      = $pData.Value
+                    Items      = $pData.Items
+                    Panel      = $pPanel
+                    Align      = $pAlign
+                    Order      = $pOrder
+                }
+
+                if ($pPanel -eq 'Top' -and $enableTop) {
+                    $topItems.Add($itemObj)
+                } elseif ($pPanel -eq 'Bottom' -and $enableBtm) {
+                    $btmItems.Add($itemObj)
+                }
+            }
+        }
+
+        $MaTopOverlay = ($enableTop -and $topItems.Count -gt 0)
+        $MaBottomOverlay = ($enableBtm -and $btmItems.Count -gt 0)
 
         if ($MaTopOverlay -or $MaBottomOverlay) {
             try {
@@ -652,39 +772,104 @@ function Save-RouteMapPng {
                 $FontDist     = [System.Drawing.Font]::new('Segoe UI', 12.0, [System.Drawing.FontStyle]::Bold)
                 $FontDate     = [System.Drawing.Font]::new('Segoe UI', 8.5,  [System.Drawing.FontStyle]::Regular)
 
-                $TopBarH = if ($MaTopOverlay) { 38 } else { 0 }
+                $PadX  = 14
+                $LineH = 20
 
-                # Pre-measure bottom text lines using temporary Graphics
+                # Pre-measurement Graphics
                 $dummyBmp = [System.Drawing.Bitmap]::new(1, 1)
                 $measGfx  = [System.Drawing.Graphics]::FromImage($dummyBmp)
 
-                $PadX       = 14
-                $LineH      = 20
-                $LabelASize = $measGfx.MeasureString('A: ', $FontBadge)
-                $LabelBSize = $measGfx.MeasureString('B: ', $FontBadge)
-                $LabelMaxW  = [float][math]::Max($LabelASize.Width, $LabelBSize.Width)
-                $AvailW     = [float]($ActualW - ($PadX * 2))
-                $AddrMaxW   = [float]($AvailW - $LabelMaxW)
+                # Helper scriptblock to group items by Order
+                $BuildRows = {
+                    param($items)
+                    $orders = @($items | Select-Object -ExpandProperty Order -Unique | Sort-Object)
+                    $rows = [System.Collections.Generic.List[PSCustomObject]]::new()
+                    foreach ($ord in $orders) {
+                        $rowItems = @($items | Where-Object { $_.Order -eq $ord })
+                        $left   = [System.Collections.Generic.List[PSCustomObject]]::new()
+                        $center = [System.Collections.Generic.List[PSCustomObject]]::new()
+                        $right  = [System.Collections.Generic.List[PSCustomObject]]::new()
+                        foreach ($it in $rowItems) {
+                            if ($it.Align -eq 'Right') { $right.Add($it) }
+                            elseif ($it.Align -eq 'Center') { $center.Add($it) }
+                            else { $left.Add($it) }
+                        }
+                        $rows.Add([PSCustomObject]@{
+                            Order  = $ord
+                            Left   = $left
+                            Center = $center
+                            Right  = $right
+                            Height = 20
+                        })
+                    }
+                    return $rows.ToArray()
+                }
 
-                $LinesA = @(Get-WrappedLines -G $measGfx -Text $TekstAdresA -F $FontAddr -MaxW $AddrMaxW)
-                $LinesB = @(Get-WrappedLines -G $measGfx -Text $TekstAdresB -F $FontAddr -MaxW $AddrMaxW)
+                $topRows = @(if ($MaTopOverlay) { & $BuildRows $topItems } else { @() })
+                $btmRows = @(if ($MaBottomOverlay) { & $BuildRows $btmItems } else { @() })
+
+                # Measure row heights
+                $MeasureRows = {
+                    param($rows, $availWidth)
+                    foreach ($row in @($rows)) {
+                        $maxH = 20
+                        $allItems = @($row.Left) + @($row.Center) + @($row.Right)
+                        foreach ($it in $allItems) {
+                            if ($it.Kind -eq 'address') {
+                                $badgeSz = $measGfx.MeasureString($it.Badge, $FontBadge)
+                                $addrW = [float]($availWidth - $badgeSz.Width)
+                                $lines = @(Get-WrappedLines -G $measGfx -Text $it.Text -F $FontAddr -MaxW $addrW)
+                                $it | Add-Member -NotePropertyName 'WrappedLines' -NotePropertyValue $lines -Force
+                                $h = [math]::Max(1, $lines.Count) * $LineH
+                                if ($h -gt $maxH) { $maxH = $h }
+                            }
+                            elseif ($it.Kind -eq 'waypoints') {
+                                $totalWpH = 0
+                                foreach ($wp in $it.Items) {
+                                    $bSz = $measGfx.MeasureString($wp.Badge, $FontBadge)
+                                    $wpMaxW = [float]($availWidth - $bSz.Width)
+                                    $wpLines = @(Get-WrappedLines -G $measGfx -Text $wp.Text -F $FontAddr -MaxW $wpMaxW)
+                                    $wp | Add-Member -NotePropertyName 'WrappedLines' -NotePropertyValue $wpLines -Force
+                                    $totalWpH += [math]::Max(1, $wpLines.Count) * $LineH
+                                }
+                                if ($totalWpH -gt $maxH) { $maxH = $totalWpH }
+                            }
+                            elseif ($it.Kind -eq 'stat') {
+                                if ($maxH -lt 24) { $maxH = 24 }
+                            }
+                            elseif ($it.Kind -in @('title', 'type')) {
+                                if ($maxH -lt 22) { $maxH = 22 }
+                            }
+                        }
+                        $row.Height = $maxH
+                    }
+                }
+
+                $availContentW = [float]($ActualW - ($PadX * 2))
+                & $MeasureRows $topRows $availContentW
+                & $MeasureRows $btmRows $availContentW
+
                 $measGfx.Dispose()
                 $dummyBmp.Dispose()
 
-                $LinesACount = [math]::Max(1, $LinesA.Count)
-                $LinesBCount = [math]::Max(1, $LinesB.Count)
+                # Calculate banner heights
+                $TopPad = 8; $TopBotPad = 8; $TopRowSpacing = 4
+                $TopBarH = 0
+                if ($MaTopOverlay -and @($topRows).Count -gt 0) {
+                    $sumTopH = (@($topRows) | Measure-Object -Property Height -Sum).Sum
+                    if (-not $sumTopH) { $sumTopH = 20 }
+                    $TopBarH = [int]($TopPad + $sumTopH + ((@($topRows).Count - 1) * $TopRowSpacing) + $TopBotPad)
+                    if ($TopBarH -lt 38) { $TopBarH = 38 }
+                }
 
-                $BtmPadTop   = 10
-                $BtmPadBot   = 10
-                $SpacingAB   = 4
-                $SpacingDist = 8
-                $DistLineH   = 24
+                $BtmPadTop = 10; $BtmPadBot = 10; $BtmRowSpacing = 6
+                $BtmBarH = 0
+                if ($MaBottomOverlay -and @($btmRows).Count -gt 0) {
+                    $sumBtmH = (@($btmRows) | Measure-Object -Property Height -Sum).Sum
+                    if (-not $sumBtmH) { $sumBtmH = 20 }
+                    $BtmBarH = [int]($BtmPadTop + $sumBtmH + ((@($btmRows).Count - 1) * $BtmRowSpacing) + $BtmPadBot)
+                }
 
-                $BtmBarH = if ($MaBottomOverlay) {
-                    $BtmPadTop + ($LinesACount * $LineH) + $SpacingAB + ($LinesBCount * $LineH) + $SpacingDist + $DistLineH + $BtmPadBot
-                } else { 0 }
-
-                # Canvas extension: Map is preserved 100% in the middle with extra height on top and bottom
                 $FinalW = $ActualW
                 $FinalH = $ActualH + $TopBarH + $BtmBarH
 
@@ -693,14 +878,14 @@ function Save-RouteMapPng {
                 $Graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
                 $Graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
 
-                # 1. Fill solid background with dark slate #0F172A
+                # 1. Background fill
                 $BrushBg = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 15, 23, 42))
                 $Graphics.FillRectangle($BrushBg, 0, 0, $FinalW, $FinalH)
 
-                # 2. Draw map in the middle — untouched and 100% visible (no overlays covering map content)
+                # 2. Draw map image in the middle
                 $Graphics.DrawImage($BitmapSrc, 0, $TopBarH, $ActualW, $ActualH)
 
-                # 3. Separator lines and color brushes
+                # 3. Brushes & Pens
                 $PenSep      = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255, 51, 65, 85), 1.5)
                 $BrushWhite  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 248, 250, 252))
                 $BrushYellow = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 250, 204, 21))
@@ -709,66 +894,141 @@ function Save-RouteMapPng {
                 $BrushRed    = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 239, 68, 68))
                 $BrushMuted  = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 148, 163, 184))
 
-                # 4. Top Header Banner (Extended on top)
-                if ($MaTopOverlay) {
-                    $Graphics.DrawLine($PenSep, 0, $TopBarH, $FinalW, $TopBarH)
-                    $TopTextY = [float](($TopBarH - $FontTopTitle.Height) / 2)
-                    $CurLeftX = [float]$PadX
-
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-                        $Graphics.DrawString($TekstNaglowekLewy, $FontTopTitle, $BrushWhite, $CurLeftX, $TopTextY)
-                        $CurLeftX += $Graphics.MeasureString($TekstNaglowekLewy, $FontTopTitle).Width
+                # Helper scriptblock to measure width of an item
+                $MeasureItemWidth = {
+                    param($it)
+                    if ($it.Kind -eq 'address') {
+                        $bSz = $Graphics.MeasureString($it.Badge, $FontBadge)
+                        $tSz = $Graphics.MeasureString($it.Text, $FontAddr)
+                        return ($bSz.Width + $tSz.Width)
                     }
+                    elseif ($it.Kind -eq 'stat') {
+                        $w = 0
+                        if ($it.Prefix) { $w += $Graphics.MeasureString($it.Prefix, $FontDistLbl).Width }
+                        if ($it.Value)  { $w += $Graphics.MeasureString($it.Value, $FontDist).Width }
+                        return $w
+                    }
+                    elseif ($it.Kind -eq 'title') {
+                        return $Graphics.MeasureString($it.Text, $FontTopTitle).Width
+                    }
+                    elseif ($it.Kind -eq 'type') {
+                        return $Graphics.MeasureString($it.Text, $FontTopType).Width
+                    }
+                    elseif ($it.Kind -eq 'date') {
+                        return $Graphics.MeasureString($it.Text, $FontDate).Width
+                    }
+                    elseif ($it.Kind -eq 'waypoints') {
+                        return 200
+                    }
+                    return 0
+                }
 
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-                        $SizeR = $Graphics.MeasureString($TekstNaglowekPrawy, $FontTopType)
-                        $RightStartX = [float][math]::Max($CurLeftX + 15, $FinalW - $PadX - $SizeR.Width)
-                        $Graphics.DrawString($TekstNaglowekPrawy, $FontTopType, $BrushYellow, $RightStartX, $TopTextY)
+                # Helper scriptblock to draw an item at specified coordinates
+                $DrawItem = {
+                    param($it, [float]$x, [float]$y)
+                    if ($it.Kind -eq 'address') {
+                        $badgeBrush = if ($it.BadgeColor -eq 'Red') { $BrushRed } else { $BrushGreen }
+                        $Graphics.DrawString($it.Badge, $FontBadge, $badgeBrush, $x, $y)
+                        $bSz = $Graphics.MeasureString($it.Badge, $FontBadge)
+                        $curLineY = $y
+                        $lines = if ($it.WrappedLines) { $it.WrappedLines } else { @($it.Text) }
+                        foreach ($line in $lines) {
+                            $Graphics.DrawString($line, $FontAddr, $BrushWhite, ($x + $bSz.Width), $curLineY)
+                            $curLineY += [float]$LineH
+                        }
+                    }
+                    elseif ($it.Kind -eq 'waypoints') {
+                        $wpY = $y
+                        foreach ($wp in $it.Items) {
+                            $Graphics.DrawString($wp.Badge, $FontBadge, $BrushCyan, $x, $wpY)
+                            $bSz = $Graphics.MeasureString($wp.Badge, $FontBadge)
+                            $lines = if ($wp.WrappedLines) { $wp.WrappedLines } else { @($wp.Text) }
+                            foreach ($line in $lines) {
+                                $Graphics.DrawString($line, $FontAddr, $BrushWhite, ($x + $bSz.Width), $wpY)
+                                $wpY += [float]$LineH
+                            }
+                        }
+                    }
+                    elseif ($it.Kind -eq 'stat') {
+                        $statX = $x
+                        if ($it.Prefix) {
+                            $pSz = $Graphics.MeasureString($it.Prefix, $FontDistLbl)
+                            $Graphics.DrawString($it.Prefix, $FontDistLbl, $BrushCyan, $statX, ($y + 2))
+                            $statX += $pSz.Width
+                        }
+                        if ($it.Value) {
+                            $Graphics.DrawString($it.Value, $FontDist, $BrushYellow, $statX, $y)
+                        }
+                    }
+                    elseif ($it.Kind -eq 'title') {
+                        $Graphics.DrawString($it.Text, $FontTopTitle, $BrushWhite, $x, $y)
+                    }
+                    elseif ($it.Kind -eq 'type') {
+                        $Graphics.DrawString($it.Text, $FontTopType, $BrushYellow, $x, $y)
+                    }
+                    elseif ($it.Kind -eq 'date') {
+                        $Graphics.DrawString($it.Text, $FontDate, $BrushMuted, $x, ($y + 3))
                     }
                 }
 
-                # 5. Bottom Footer Banner (Extended on bottom, distance & time a line lower)
-                if ($MaBottomOverlay) {
+                # Helper scriptblock to render a banner's rows
+                $RenderBannerRows = {
+                    param($rows, [float]$startY, [float]$spacing)
+                    $curY = $startY
+                    foreach ($row in $rows) {
+                        $leftX = [float]$PadX
+
+                        # 1. Left items
+                        foreach ($it in $row.Left) {
+                            & $DrawItem $it $leftX $curY
+                            $w = & $MeasureItemWidth $it
+                            $leftX += [float]($w + 14)
+                        }
+
+                        # 2. Right items
+                        $totalRightW = 0
+                        foreach ($it in $row.Right) {
+                            $totalRightW += [float]((& $MeasureItemWidth $it) + 12)
+                        }
+                        $rightX = [float]($FinalW - $PadX - $totalRightW + 12)
+                        foreach ($it in $row.Right) {
+                            & $DrawItem $it $rightX $curY
+                            $w = & $MeasureItemWidth $it
+                            $rightX += [float]($w + 12)
+                        }
+
+                        # 3. Center items
+                        $totalCenterW = 0
+                        foreach ($it in $row.Center) {
+                            $totalCenterW += [float]((& $MeasureItemWidth $it) + 12)
+                        }
+                        $centerX = [float][math]::Max($leftX + 10, ($FinalW - $totalCenterW + 12) / 2)
+                        foreach ($it in $row.Center) {
+                            & $DrawItem $it $centerX $curY
+                            $w = & $MeasureItemWidth $it
+                            $centerX += [float]($w + 12)
+                        }
+
+                        $curY += [float]($row.Height + $spacing)
+                    }
+                }
+
+                # 4. Draw Top Header Banner
+                if ($MaTopOverlay -and $TopBarH -gt 0 -and @($topRows).Count -gt 0) {
+                    $Graphics.DrawLine($PenSep, 0, $TopBarH, $FinalW, $TopBarH)
+                    $topStartY = [float]$TopPad
+                    if (@($topRows).Count -eq 1) {
+                        $topStartY = [float][math]::Max(6, ($TopBarH - $topRows[0].Height) / 2)
+                    }
+                    & $RenderBannerRows $topRows $topStartY $TopRowSpacing
+                }
+
+                # 5. Draw Bottom Footer Banner
+                if ($MaBottomOverlay -and $BtmBarH -gt 0 -and @($btmRows).Count -gt 0) {
                     $BtmBarY = $TopBarH + $ActualH
                     $Graphics.DrawLine($PenSep, 0, $BtmBarY, $FinalW, $BtmBarY)
-
-                    $CurY = [float]($BtmBarY + $BtmPadTop)
-                    $LabelXOffset = [float]($PadX + $LabelMaxW)
-
-                    # Line 1: Origin [A]
-                    $Graphics.DrawString('A: ', $FontBadge, $BrushGreen, [float]$PadX, $CurY)
-                    foreach ($Line in $LinesA) {
-                        $Graphics.DrawString($Line, $FontAddr, $BrushWhite, $LabelXOffset, $CurY)
-                        $CurY += [float]$LineH
-                    }
-
-                    # Line 2: Destination [B]
-                    $CurY += [float]$SpacingAB
-                    $Graphics.DrawString('B: ', $FontBadge, $BrushRed, [float]$PadX, $CurY)
-                    foreach ($Line in $LinesB) {
-                        $Graphics.DrawString($Line, $FontAddr, $BrushWhite, $LabelXOffset, $CurY)
-                        $CurY += [float]$LineH
-                    }
-
-                    # Line 3: Distance and Duration A LINE LOWER (never overlaps with addresses)
-                    $CurY += [float]$SpacingDist
-                    if (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana)) {
-                        $distLblText = switch ($LanguageCode) {
-                            'de'    { "Gesamt: " }
-                            'pl'    { "Razem: " }
-                            default { "Total: " }
-                        }
-                        $distLblSize = $Graphics.MeasureString($distLblText, $FontDistLbl)
-                        $Graphics.DrawString($distLblText, $FontDistLbl, $BrushCyan, [float]$PadX, [float]($CurY + 2))
-                        $Graphics.DrawString($TekstOdlegloscWyswietlana, $FontDist, $BrushYellow, [float]($PadX + $distLblSize.Width), $CurY)
-                    }
-
-                    # Timestamp on Line 3 (Right aligned)
-                    $DateStr   = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
-                    $DateSizeF = $Graphics.MeasureString($DateStr, $FontDate)
-                    $DateX     = [float]($FinalW - $DateSizeF.Width - $PadX)
-                    $DateY     = [float]($CurY + 3)
-                    $Graphics.DrawString($DateStr, $FontDate, $BrushMuted, $DateX, $DateY)
+                    $btmStartY = [float]($BtmBarY + $BtmPadTop)
+                    & $RenderBannerRows $btmRows $btmStartY $BtmRowSpacing
                 }
 
                 # Dispose GDI+ objects
@@ -792,10 +1052,6 @@ function Save-RouteMapPng {
         return $false
     }
 }
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 5. UNIWERSALNY IMPORT DANYCH (JSON, CSV, EXCEL)
-# ══════════════════════════════════════════════════════════════════════════════
 
 function Find-MatchingPropertyName {
     param(
