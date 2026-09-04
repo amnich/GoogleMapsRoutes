@@ -514,16 +514,16 @@ function Save-RouteMapPng {
         [Parameter()][int]$Width = 900,
         [Parameter()][int]$Height = 600,
         [Parameter()][object[]]$RoutePoints = @(),
-        [Parameter()][string]$TekstAdresA = '',
-        [Parameter()][string]$TekstAdresB = '',
-        [Parameter()][string]$TekstOdleglosc = '',
-        [Parameter()][string]$TekstCzas = '',
-        [Parameter()][string]$TekstNaglowekLewy = '',
-        [Parameter()][string]$TekstNaglowekPrawy = '',
-        [Parameter()][string]$TekstUmowa = '',
-        [Parameter()][string]$TekstKierunek = '',
-        [Parameter()][string]$Opis = '',
-        [Parameter()][string]$DataWygenerowania = '',
+        [Parameter()][Alias('TekstAdresA')][string]$AddressTextA = '',
+        [Parameter()][Alias('TekstAdresB')][string]$AddressTextB = '',
+        [Parameter()][Alias('TekstOdleglosc')][string]$DistanceText = '',
+        [Parameter()][Alias('TekstCzas')][string]$DurationText = '',
+        [Parameter()][Alias('TekstNaglowekLewy')][string]$HeaderLeftText = '',
+        [Parameter()][Alias('TekstNaglowekPrawy')][string]$HeaderRightText = '',
+        [Parameter()][Alias('TekstUmowa')][string]$ContractText = '',
+        [Parameter()][Alias('TekstKierunek')][string]$DirectionText = '',
+        [Parameter()][Alias('Opis')][string]$Description = '',
+        [Parameter()][Alias('DataWygenerowania')][string]$GeneratedDate = '',
         [Parameter()][string]$LanguageCode = 'en',
         [Parameter()][string]$StartRaw = '',
         [Parameter()][string]$StartGeocoded = '',
@@ -623,14 +623,14 @@ function Save-RouteMapPng {
         $enableBtm = if ($null -ne $OverlayConfig.EnableBottomOverlay) { [bool]$OverlayConfig.EnableBottomOverlay } else { $true }
 
         # Resolve data values
-        $addrStartGeo = if ($StartGeocoded) { $StartGeocoded } elseif ($TekstAdresA) { $TekstAdresA } else { '' }
+        $addrStartGeo = if ($StartGeocoded) { $StartGeocoded } elseif ($AddressTextA) { $AddressTextA } else { '' }
         $addrStartRaw = if ($StartRaw) { $StartRaw } else { '' }
-        $addrEndGeo   = if ($EndGeocoded) { $EndGeocoded } elseif ($TekstAdresB) { $TekstAdresB } else { '' }
+        $addrEndGeo   = if ($EndGeocoded) { $EndGeocoded } elseif ($AddressTextB) { $AddressTextB } else { '' }
         $addrEndRaw   = if ($EndRaw) { $EndRaw } else { '' }
 
-        $nameVal = if ($RouteName) { $RouteName } elseif ($TekstNaglowekLewy) { $TekstNaglowekLewy } elseif ($Opis) { $Opis.Trim() } elseif ($TekstUmowa) { $TekstUmowa } else { '' }
+        $nameVal = if ($RouteName) { $RouteName } elseif ($HeaderLeftText) { $HeaderLeftText } elseif ($Description) { $Description.Trim() } elseif ($ContractText) { $ContractText } else { '' }
 
-        $typeVal = if ($RouteType) { $RouteType } elseif ($TekstNaglowekPrawy) { $TekstNaglowekPrawy } elseif ($TekstKierunek) { $TekstKierunek } else { '' }
+        $typeVal = if ($RouteType) { $RouteType } elseif ($HeaderRightText) { $HeaderRightText } elseif ($DirectionText) { $DirectionText } else { '' }
         if ($typeVal -match '^(?:Type|Typ|Art):\s*(.+)$' -or $typeVal -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
             $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
             $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
@@ -647,13 +647,13 @@ function Save-RouteMapPng {
         }
 
         $distPrefix = switch ($lang) { 'de' { 'Gesamt: ' } 'pl' { 'Razem: ' } default { 'Total: ' } }
-        $distVal = if ($TekstOdleglosc) { $TekstOdleglosc } else { '' }
+        $distVal = if ($DistanceText) { $DistanceText } else { '' }
 
-        $durVal = if ($TekstCzas) {
-            if ($TekstCzas -match '^\(.*\)$') { $TekstCzas } else { "($TekstCzas)" }
+        $durVal = if ($DurationText) {
+            if ($DurationText -match '^\(.*\)$') { $DurationText } else { "($DurationText)" }
         } else { '' }
 
-        $dateVal = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
+        $dateVal = if ($GeneratedDate) { $GeneratedDate } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
 
         $wpItems = [System.Collections.Generic.List[PSCustomObject]]::new()
         $rawWpList = if ($WaypointsList -and @($WaypointsList).Count -gt 0) {

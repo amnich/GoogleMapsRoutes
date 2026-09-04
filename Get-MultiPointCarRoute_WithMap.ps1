@@ -160,8 +160,8 @@ $MapSaved = Save-RouteMapPng -EncodedPolyline $Route.EncodedPolyline `
     -DestLat $Destination.Latitude -DestLng $Destination.Longitude `
     -RoutePoints $GeocodedPoints -OutputPath $MapPath -ApiKey $ApiKey `
     -Width $MapWidth -Height $MapHeight `
-    -TekstAdresA $Origin.AdresGeokodowany -TekstAdresB $Destination.AdresGeokodowany `
-    -TekstOdleglosc "$($Route.OdlegloscKm) km"
+    -AddressTextA $Origin.AdresGeokodowany -AddressTextB $Destination.AdresGeokodowany `
+    -DistanceText "$($Route.OdlegloscKm) km"
 
 $OriginValue = [System.Uri]::EscapeDataString("$($Origin.Latitude),$($Origin.Longitude)")
 $DestinationValue = [System.Uri]::EscapeDataString("$($Destination.Latitude),$($Destination.Longitude)")

@@ -349,16 +349,16 @@ function Save-RouteMapPng {
         [Parameter()][int]$Width = 900,
         [Parameter()][int]$Height = 600,
         [Parameter()][object[]]$RoutePoints = @(),
-        [Parameter()][string]$TekstAdresA = '',
-        [Parameter()][string]$TekstAdresB = '',
-        [Parameter()][string]$TekstOdleglosc = '',
-        [Parameter()][string]$TekstCzas = '',
-        [Parameter()][string]$TekstNaglowekLewy = '',
-        [Parameter()][string]$TekstNaglowekPrawy = '',
-        [Parameter()][string]$TekstUmowa = '',
-        [Parameter()][string]$TekstKierunek = '',
-        [Parameter()][string]$Opis = '',
-        [Parameter()][string]$DataWygenerowania = '',
+        [Parameter()][Alias('TekstAdresA')][string]$AddressTextA = '',
+        [Parameter()][Alias('TekstAdresB')][string]$AddressTextB = '',
+        [Parameter()][Alias('TekstOdleglosc')][string]$DistanceText = '',
+        [Parameter()][Alias('TekstCzas')][string]$DurationText = '',
+        [Parameter()][Alias('TekstNaglowekLewy')][string]$HeaderLeftText = '',
+        [Parameter()][Alias('TekstNaglowekPrawy')][string]$HeaderRightText = '',
+        [Parameter()][Alias('TekstUmowa')][string]$ContractText = '',
+        [Parameter()][Alias('TekstKierunek')][string]$DirectionText = '',
+        [Parameter()][Alias('Opis')][string]$Description = '',
+        [Parameter()][Alias('DataWygenerowania')][string]$GeneratedDate = '',
         [Parameter()][string]$LanguageCode = 'pl'
     )
 
@@ -424,24 +424,24 @@ function Save-RouteMapPng {
         }
 
         # Header Left: Description / Title / Contract
-        if ([string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-            if (-not [string]::IsNullOrWhiteSpace($Opis)) {
-                $TekstNaglowekLewy = $Opis.Trim()
-            } elseif (-not [string]::IsNullOrWhiteSpace($TekstUmowa)) {
-                $TekstNaglowekLewy = if ($TekstUmowa -match '^(numer\s*umowy|contract|umowa|nr\s*umowy):') { $TekstUmowa } else { "Contract: $TekstUmowa" }
+        if ([string]::IsNullOrWhiteSpace($HeaderLeftText)) {
+            if (-not [string]::IsNullOrWhiteSpace($Description)) {
+                $HeaderLeftText = $Description.Trim()
+            } elseif (-not [string]::IsNullOrWhiteSpace($ContractText)) {
+                $HeaderLeftText = if ($ContractText -match '^(numer\s*umowy|contract|umowa|nr\s*umowy):') { $ContractText } else { "Contract: $ContractText" }
             }
         }
 
         # Header Right: Direction / Route Type / Date
-        if ([string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-            if (-not [string]::IsNullOrWhiteSpace($TekstKierunek)) {
+        if ([string]::IsNullOrWhiteSpace($HeaderRightText)) {
+            if (-not [string]::IsNullOrWhiteSpace($DirectionText)) {
                 $prefixDir = switch ($lang) { 'de' { 'Richtung: ' } 'pl' { 'Kierunek: ' } default { 'Direction: ' } }
-                $TekstNaglowekPrawy = if ($TekstKierunek -match '^(kierunek|direction|route|trasa|richtung):') { $TekstKierunek } else { "$prefixDir$TekstKierunek" }
+                $HeaderRightText = if ($DirectionText -match '^(kierunek|direction|route|trasa|richtung):') { $DirectionText } else { "$prefixDir$DirectionText" }
             }
         }
         else {
             # Localize passed Type / Typ string according to $LanguageCode
-            if ($TekstNaglowekPrawy -match '^(?:Type|Typ|Art):\s*(.+)$' -or $TekstNaglowekPrawy -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
+            if ($HeaderRightText -match '^(?:Type|Typ|Art):\s*(.+)$' -or $HeaderRightText -match '^(Shortest|Fastest|Eco|Najkr[oó]tsza|Najszybsza|Eko|K[uü]rzeste|Schnellste)$') {
                 $rawVal = if ($Matches[1]) { $Matches[1].Trim() } else { $Matches[0].Trim() }
                 $normVal = if ($rawVal -match '(?i)short|kr[oó]t|k[uü]rz') { 'Shortest' }
                            elseif ($rawVal -match '(?i)eco|eko|fuel') { 'Eco' }
@@ -454,18 +454,18 @@ function Save-RouteMapPng {
                     'pl' { if ($normVal -eq 'Fastest') { 'Najszybsza' } elseif ($normVal -eq 'Shortest') { 'Najkrótsza' } elseif ($normVal -eq 'Eco') { 'Eko' } else { $normVal } }
                     default { $normVal }
                 }
-                $TekstNaglowekPrawy = "$tPrefix$tName"
+                $HeaderRightText = "$tPrefix$tName"
             }
         }
 
         # Format distance and duration string
-        $TekstOdlegloscWyswietlana = $TekstOdleglosc
-        if (-not [string]::IsNullOrWhiteSpace($TekstCzas)) {
-            $TekstOdlegloscWyswietlana = if ($TekstOdlegloscWyswietlana) { "$TekstOdlegloscWyswietlana  ($TekstCzas)" } else { $TekstCzas }
+        $DisplayDistanceText = $DistanceText
+        if (-not [string]::IsNullOrWhiteSpace($DurationText)) {
+            $DisplayDistanceText = if ($DisplayDistanceText) { "$DisplayDistanceText  ($DurationText)" } else { $DurationText }
         }
 
-        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) -or (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy))
-        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($TekstAdresA)) -or (-not [string]::IsNullOrWhiteSpace($TekstAdresB)) -or (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana))
+        $MaTopOverlay = (-not [string]::IsNullOrWhiteSpace($HeaderLeftText)) -or (-not [string]::IsNullOrWhiteSpace($HeaderRightText))
+        $MaBottomOverlay = (-not [string]::IsNullOrWhiteSpace($AddressTextA)) -or (-not [string]::IsNullOrWhiteSpace($AddressTextB)) -or (-not [string]::IsNullOrWhiteSpace($DisplayDistanceText))
 
         if ($MaTopOverlay -or $MaBottomOverlay) {
             try {
@@ -501,8 +501,8 @@ function Save-RouteMapPng {
                 $AvailW     = [float]($ActualW - ($PadX * 2))
                 $AddrMaxW   = [float]($AvailW - $LabelMaxW)
 
-                $LinesA = @(Get-WrappedLines -G $measGfx -Text $TekstAdresA -F $FontAddr -MaxW $AddrMaxW)
-                $LinesB = @(Get-WrappedLines -G $measGfx -Text $TekstAdresB -F $FontAddr -MaxW $AddrMaxW)
+                $LinesA = @(Get-WrappedLines -G $measGfx -Text $AddressTextA -F $FontAddr -MaxW $AddrMaxW)
+                $LinesB = @(Get-WrappedLines -G $measGfx -Text $AddressTextB -F $FontAddr -MaxW $AddrMaxW)
                 $measGfx.Dispose()
                 $dummyBmp.Dispose()
 
@@ -550,15 +550,15 @@ function Save-RouteMapPng {
                     $TopTextY = [float](($TopBarH - $FontTopTitle.Height) / 2)
                     $CurLeftX = [float]$PadX
 
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekLewy)) {
-                        $Graphics.DrawString($TekstNaglowekLewy, $FontTopTitle, $BrushWhite, $CurLeftX, $TopTextY)
-                        $CurLeftX += $Graphics.MeasureString($TekstNaglowekLewy, $FontTopTitle).Width
+                    if (-not [string]::IsNullOrWhiteSpace($HeaderLeftText)) {
+                        $Graphics.DrawString($HeaderLeftText, $FontTopTitle, $BrushWhite, $CurLeftX, $TopTextY)
+                        $CurLeftX += $Graphics.MeasureString($HeaderLeftText, $FontTopTitle).Width
                     }
 
-                    if (-not [string]::IsNullOrWhiteSpace($TekstNaglowekPrawy)) {
-                        $SizeR = $Graphics.MeasureString($TekstNaglowekPrawy, $FontTopType)
+                    if (-not [string]::IsNullOrWhiteSpace($HeaderRightText)) {
+                        $SizeR = $Graphics.MeasureString($HeaderRightText, $FontTopType)
                         $RightStartX = [float][math]::Max($CurLeftX + 15, $FinalW - $PadX - $SizeR.Width)
-                        $Graphics.DrawString($TekstNaglowekPrawy, $FontTopType, $BrushYellow, $RightStartX, $TopTextY)
+                        $Graphics.DrawString($HeaderRightText, $FontTopType, $BrushYellow, $RightStartX, $TopTextY)
                     }
                 }
 
@@ -587,15 +587,15 @@ function Save-RouteMapPng {
 
                     # Line 3: Distance and Duration A LINE LOWER (never overlaps with addresses)
                     $CurY += [float]$SpacingDist
-                    if (-not [string]::IsNullOrWhiteSpace($TekstOdlegloscWyswietlana)) {
+                    if (-not [string]::IsNullOrWhiteSpace($DisplayDistanceText)) {
                         $distLblText = switch ($lang) { 'de' { 'Gesamt: ' } 'pl' { 'Razem: ' } default { 'Total: ' } }
                         $distLblSize = $Graphics.MeasureString($distLblText, $FontDistLbl)
                         $Graphics.DrawString($distLblText, $FontDistLbl, $BrushCyan, [float]$PadX, [float]($CurY + 2))
-                        $Graphics.DrawString($TekstOdlegloscWyswietlana, $FontDist, $BrushYellow, [float]($PadX + $distLblSize.Width), $CurY)
+                        $Graphics.DrawString($DisplayDistanceText, $FontDist, $BrushYellow, [float]($PadX + $distLblSize.Width), $CurY)
                     }
 
                     # Timestamp on Line 3 (Right aligned)
-                    $DateStr   = if ($DataWygenerowania) { $DataWygenerowania } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
+                    $DateStr   = if ($GeneratedDate) { $GeneratedDate } else { (Get-Date -Format 'yyyy-MM-dd  HH:mm') }
                     $DateSizeF = $Graphics.MeasureString($DateStr, $FontDate)
                     $DateX     = [float]($FinalW - $DateSizeF.Width - $PadX)
                     $DateY     = [float]($CurY + 3)
@@ -658,9 +658,9 @@ function Invoke-RouteAndMap {
             -OriginLat $GeoStart.Latitude -OriginLng $GeoStart.Longitude `
             -DestLat $GeoEnd.Latitude -DestLng $GeoEnd.Longitude `
             -OutputPath $PngPath -ApiKey $ApiKey -Width $Width -Height $Height `
-            -TekstAdresA $TekstA -TekstAdresB $TekstB -TekstOdleglosc $OdlTekst `
-            -TekstUmowa $NumerUmowy -TekstKierunek $KierunekTekst `
-            -Opis $Opis -DataWygenerowania $DataWygenerowania
+            -AddressTextA $TekstA -AddressTextB $TekstB -DistanceText $OdlTekst `
+            -ContractText $NumerUmowy -DirectionText $KierunekTekst `
+            -Description $Opis -GeneratedDate $DataWygenerowania
     }
 
     return [PSCustomObject]@{ OdlegloscKm = $Trasa.OdlegloscKm; Status = $Trasa.Status; MapSaved = $MapSaved }

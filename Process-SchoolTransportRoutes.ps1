@@ -137,9 +137,9 @@ function Invoke-RouteAndMap {
             -OriginLat $GeoStart.Latitude -OriginLng $GeoStart.Longitude `
             -DestLat $GeoEnd.Latitude -DestLng $GeoEnd.Longitude `
             -OutputPath $PngPath -ApiKey $ApiKey -Width $Width -Height $Height `
-            -TekstAdresA $TekstA -TekstAdresB $TekstB -TekstOdleglosc $OdlTekst `
-            -TekstUmowa $NumerUmowy -TekstKierunek $KierunekTekst `
-            -Opis $Opis -DataWygenerowania $DataWygenerowania
+            -AddressTextA $TekstA -AddressTextB $TekstB -DistanceText $OdlTekst `
+            -ContractText $NumerUmowy -DirectionText $KierunekTekst `
+            -Description $Opis -GeneratedDate $DataWygenerowania
 
         if ($MapSaved) {
             Write-Host "    Mapa: $(Split-Path -Leaf $PngPath)" -ForegroundColor Cyan

@@ -234,9 +234,9 @@ foreach ($Row in $Dane) {
             -OriginLat $GeoA.Latitude -OriginLng $GeoA.Longitude `
             -DestLat   $GeoB.Latitude -DestLng   $GeoB.Longitude `
             -OutputPath $PngPath -ApiKey $ApiKey -Width $MapWidth -Height $MapHeight `
-            -TekstAdresA    $TekstA_Mapa `
-            -TekstAdresB    $TekstB_Mapa `
-            -TekstOdleglosc $OdlTekst
+            -AddressTextA   $TekstA_Mapa `
+            -AddressTextB   $TekstB_Mapa `
+            -DistanceText   $OdlTekst
         if ($MapSaved) {
             $Wynik.PlikMapy = $PngPath
             Write-Host "  Mapa: $PngFileName" -ForegroundColor Cyan

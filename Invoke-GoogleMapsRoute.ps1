@@ -249,9 +249,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Manual') {
             -DestLat $GeoEnd.Latitude -DestLng $GeoEnd.Longitude `
             -RoutePoints $AllRoutePoints -OutputPath $MapPath -ApiKey $ApiKey `
             -Width $MapWidth -Height $MapHeight `
-            -TekstAdresA $GeoStart.FormattedAddress -TekstAdresB $GeoEnd.FormattedAddress `
-            -TekstOdleglosc "$($Trasa.OdlegloscKm) km" -TekstCzas "$($Trasa.CzasMin) min" `
-            -TekstNaglowekLewy $Name -TekstNaglowekPrawy "Typ: $ActualRouteType"
+            -AddressTextA $GeoStart.FormattedAddress -AddressTextB $GeoEnd.FormattedAddress `
+            -DistanceText "$($Trasa.OdlegloscKm) km" -DurationText "$($Trasa.CzasMin) min" `
+            -HeaderLeftText $Name -HeaderRightText "Typ: $ActualRouteType"
 
         if ($MapSaved) {
             Write-Host "  Mapa PNG : $MapPath" -ForegroundColor Cyan
@@ -431,9 +431,9 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     -DestLat $GeoEnd.Latitude -DestLng $GeoEnd.Longitude `
                     -RoutePoints $AllRoutePoints -OutputPath $MapPath -ApiKey $ApiKey `
                     -Width $MapWidth -Height $MapHeight `
-                    -TekstAdresA $GeoStart.FormattedAddress -TekstAdresB $GeoEnd.FormattedAddress `
-                    -TekstOdleglosc "$($Trasa.OdlegloscKm) km" -TekstCzas "$($Trasa.CzasMin) min" `
-                    -TekstNaglowekLewy $RouteName -TekstNaglowekPrawy "Typ: $RowRouteType"
+                    -AddressTextA $GeoStart.FormattedAddress -AddressTextB $GeoEnd.FormattedAddress `
+                    -DistanceText "$($Trasa.OdlegloscKm) km" -DurationText "$($Trasa.CzasMin) min" `
+                    -HeaderLeftText $RouteName -HeaderRightText "Typ: $RowRouteType"
             }
 
             $ResultsList.Add([PSCustomObject]@{
