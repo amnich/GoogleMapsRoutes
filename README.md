@@ -1,83 +1,128 @@
 ﻿# Google Maps Routes & Map Generator v2.0
 
-Zaawansowane, uniwersalne narzędzie PowerShell do obliczania tras samochodowych (jedno- i wielopunktowych), optymalizacji pod kątem czasu (**Fastest**), odległości (**Shortest**) i zużycia energii (**Eco / Fuel Efficient**) oraz generowania estetycznych map poglądowych PNG za pomocą **Google Maps Platform** (Routes API v2, Geocoding API, Static Maps API).
-
-Aplikacja oferuje dwa niezależne interfejsy:
-1. **Nowoczesną aplikację okienkową WPF Dark Mode** (`GoogleMapsRoutes-GUI.ps1`) obsługującą wprowadzanie ręczne oraz przetwarzanie wsadowe.
-2. **Zaawansowany skrypt wiersza poleceń (CLI)** (`Invoke-GoogleMapsRoute.ps1`) do skryptowania, automatyzacji i integracji potokowej PowerShell.
+An enterprise-grade, universal PowerShell and WPF application for multi-stop vehicle route calculation, multi-criteria optimization (**Fastest**, **Shortest**, **Eco / Fuel-Efficient**), and presentation-ready PNG map generation powered by **Google Maps Platform** (Routes API v2, Geocoding API, and Maps Static API).
 
 ---
 
-## Główne Możliwości
+## Key Features
 
-- **Wielopunktowe trasy (Multipoint Routing)**:
-  - Punkt początkowy (Start / A)
-  - Do 25 uporządkowanych punktów pośrednich (Waypoints)
-  - Punkt końcowy (Cel / B)
-- **Typy optymalizacji trasy**:
-  - `Fastest` (**Najszybsza**): Minimalizuje łączny czas przejazdu (z opcją Live Traffic).
-  - `Shortest` (**Najkrótsza**): Wybiera najkrótszy fizyczny dystans (km) spośród alternatywnych tras Google.
-  - `Eco` (**Ekologiczna / Fuel Efficient**): Żąda od Google Routes API trasy o najniższym zużyciu paliwa i emisji CO2 z uwzględnieniem typu napędu (`GASOLINE`, `DIESEL`, `HYBRID`, `ELECTRIC`).
-- **Uniwersalne źródła danych**:
-  - **JSON** (`.json`): Obsługuje listę tras oraz sekwencję przystanków pojedynczej podróży.
-  - **CSV / TSV** (`.csv`, `.tsv`): Automatyczne wykrywanie separatorów (średnik, przecinek, tabulator) i polskich/angielskich nagłówków.
-  - **Excel** (`.xlsx`, `.xls`): Pełne wsparcie dla arkuszy kalkulacyjnych z automatycznym filtrowaniem i stylizacją.
-- **Ręczne wprowadzanie parametrów (Manual Input)**:
-  - W wierszu poleceń (parametry `-StartPoint`, `-EndPoint`, `-Waypoints`).
-  - W interfejsie graficznym (wyszukiwanie adresów, dynamiczna lista przystanków, zmiana kolejności góra/dół).
-- **Wizualizacja i podgląd**:
-  - Generowanie mapy PNG (Google Static Maps) z zielonym punktem `A`, niebieskimi numerowanymi przystankami `1..N`, czerwonym punktem `B` i górną/dolną belką informacyjną.
-  - Generowanie klikalnego linku do oficjalnej nawigacji Google Maps.
-- **Bezpieczeństwo**:
-  - Bezpieczne przechowywanie klucza Google Maps API przy użyciu szyfrowania Windows DPAPI per-user.
-- **Kompilacja do EXE**:
-  - Kompilacja do samodzielnego pliku wykonywalnego `GoogleMapsRoutes.exe` za pomocą modułu PS2EXE.
+### 1. Multi-Stop Route Optimization (Routes API v2)
+- **Origin & Destination**: Geocoded with full street address validation.
+- **Waypoints**: Up to 25 intermediate stops with interactive reordering (Move Up / Move Down).
+- **Optimization Modes**:
+  - ⚡ **Fastest (`Fastest`)**: Minimizes travel time with optional live traffic awareness (`TRAFFIC_AWARE`).
+  - 📏 **Shortest (`Shortest`)**: Minimizes physical distance (km) by analyzing Google route alternatives (`TRAFFIC_UNAWARE`).
+  - 🌿 **Eco / Fuel-Efficient (`Eco`)**: Minimizes fuel consumption and CO₂ emissions tailored to vehicle engine type (`GASOLINE`, `DIESEL`, `HYBRID`, `ELECTRIC`).
+
+### 2. Zero-Occlusion Extended Map Canvas (GDI+)
+- **No Map Overlays**: Unlike standard static map tools that stamp text over map tiles, our custom GDI+ rendering engine **extends the canvas vertically**:
+  - **Top Banner (38px)**: Route title/description on the left, localized route type badge (`Typ: Najkrótsza`, `Type: Shortest`, `Typ: Kürzeste`) in yellow on the right.
+  - **Unobstructed Map**: 100% visible Google map tiles with full road geometry, markers (`A`, `1..N`, `B`), and encoded polyline.
+  - **Bottom Banner**: Origin [A] in green, Destination [B] in red, with total distance and duration placed **a line lower** so multi-line wrapped addresses never collide with metrics.
+
+### 3. Multi-Language Support (EN / DE / PL) & External Schema
+- **Dynamic UI Localization**: Switch between **English**, **Deutsch**, and **Polski** at runtime via the header dropdown (`[PL] Polski`).
+- **External Configuration (`localization.json`)**: Add new languages (e.g. `FR`, `ES`, `IT`) without modifying source code or recompiling.
+- **Google Maps API Integration**: API requests pass the selected language (`language=pl`, `languageCode: "pl"`), ensuring map tiles, exonyms, and street names match the chosen locale.
+
+### 4. Universal Batch Processing
+- **Excel (.xlsx)**: Processes tabular route files automatically. Supports common header variations:
+  - `Name` / `Nazwa` / `Umowa` / `Opis`
+  - `Start` / `Dom` / `Origin` / `Początek`
+  - `End` / `Szkola` / `Praca` / `Destination` / `Cel` / `Koniec`
+  - `Waypoints` / `PunktyPosrednie` (separated by `;` or `|`)
+  - `RouteType` / `TypTrasy` (`Fastest`, `Shortest`, `Eco`)
+- **CSV / TSV**: Automatic delimiter detection (semicolon, comma, tab).
+- **JSON**: Supports both route lists and sequential single-trip stops.
+- **Smart Folder Memory**: Remembers last-opened directory and output paths across sessions.
+
+### 5. Production Security & Standalone Compilation
+- **Windows DPAPI Credential Protection**: API keys are securely encrypted using Windows DPAPI (`DataProtectionScope.CurrentUser`) and stored in `config.json`.
+- **Standalone Windows Executable**: Compile into a single, standalone executable (`GoogleMapsRoutes.exe`) using `Build-Exe.ps1` (powered by PS2EXE). Runs in Single-Threaded Apartment (`-STA`) without console windows (`-NoConsole`).
 
 ---
 
-## Wymagania
+## Architecture
 
-- **System operacyjny**: Windows 10 / Windows 11 / Windows Server
-- **Środowisko**: PowerShell 5.1 (Desktop) lub PowerShell 7+ (Core)
-- **Moduły**: `ImportExcel` (do obsługi plików .xlsx), opcjonalnie `ps2exe` (do kompilacji EXE)
-- **Klucz API**: Google Maps API z włączonymi usługami:
-  - Routes API (v2)
-  - Geocoding API
-  - Maps Static API
+```mermaid
+flowchart LR
+    subgraph Input ["Data Sources"]
+        UI["WPF GUI (Manual)"]
+        CLI["CLI Script"]
+        Files["JSON / CSV / XLSX"]
+    end
 
----
+    subgraph Engine ["RouteMapFunctions Engine"]
+        Geo["1. Geocoding API
+(Lat/Lng Coordinates)"]
+        Routes["2. Routes API v2
+(Fastest / Shortest / Eco)"]
+        Static["3. Static Maps API
+(Polyline + Markers)"]
+        Canvas["4. GDI+ Canvas Layout
+(Extended Top & Bottom)"]
+    end
 
-## Szybki Start (GUI)
+    subgraph Output ["Deliverables"]
+        PNG["Presentation Map PNG"]
+        GUrl["Google Maps Web Link"]
+        Reports["Excel / CSV Summary Reports"]
+    end
 
-Uruchomienie aplikacji okienkowej:
-
-```powershell
-.\GoogleMapsRoutes-GUI.ps1
+    Input --> Geo --> Routes --> Static --> Canvas --> PNG
+    Routes --> GUrl
+    Input --> Reports
 ```
 
-### Tryb Ręczny (Manual)
-1. Wprowadź punkt początkowy (np. `Warszawa, Plac Defilad 1`).
-2. Wprowadź punkt docelowy (np. `Kraków, Rynek Główny 1`).
-3. Opcjonalnie dodaj punkty pośrednie (np. `Radom`, `Kielce`) i ustal ich kolejność przyciskami ▲/▼.
-4. Wybierz typ trasy: **Najszybsza**, **Najkrótsza** lub **Eco**.
-5. Kliknij **🚀 Oblicz trasę i pobierz mapę**.
-6. Wyświetli się łączny dystans, czas, podgląd mapy oraz przyciski do otwarcia trasy w Google Maps.
+---
 
-### Tryb Wsadowy (Batch)
-1. Przejdź do zakładki **📁 Z Pliku Danych (Batch)**.
-2. Kliknij **Wybierz plik...** i wskaż plik `.xlsx`, `.csv` lub `.json` (przykłady znajdują się w katalogu `.\Samples`).
-3. Sprawdź podgląd wczytanych rekordów w tabeli.
-4. Kliknij **▶ Rozpocznij przetwarzanie**.
-5. Po zakończeniu kliknij **Otwórz folder wyników** lub wyeksportuj raport do Excel / CSV / JSON.
+## Requirements
+
+- **Operating System**: Windows 10 / Windows 11 / Windows Server 2016+
+- **PowerShell**: Windows PowerShell 5.1 or PowerShell 7+ (Core)
+- **PowerShell Modules**:
+  - `ImportExcel` (required for Excel `.xlsx` processing)
+  - `ps2exe` (optional, for compiling `.exe` executables)
+- **Google Maps API Key** with the following services enabled:
+  - **Routes API** (v2)
+  - **Geocoding API**
+  - **Maps Static API**
 
 ---
 
-## Użycie z Wiersza Poleceń (CLI)
+## Quick Start
 
-Głównym skryptem CLI jest `Invoke-GoogleMapsRoute.ps1`.
+### Graphical User Interface (GUI)
+Run the script directly or launch the compiled `.exe`:
+```powershell
+# Run PowerShell script:
+.\GoogleMapsRoutes-GUI.ps1
 
-### 1. Trasa ręczna z punktami pośrednimi
+# Or run the standalone executable:
+.\GoogleMapsRoutes.exe
+```
 
+#### Manual Route Calculation:
+1. Enter **Origin (A)** and **Destination (B)** addresses.
+2. (Optional) Add intermediate stops in the **Waypoints** list and organize them using ▲/▼.
+3. Select route optimization: **Fastest**, **Shortest**, or **Eco**.
+4. Click **🚀 CALCULATE ROUTE & DOWNLOAD MAP**.
+5. View real-time distance, travel time, and the rendered map. Use **🌐 Google Maps** to open the route in your browser.
+
+#### Batch File Processing:
+1. Switch to the **📁 Batch File Processing** tab.
+2. Click **📂 Browse File...** and select a `.json`, `.csv`, or `.xlsx` file (see `.\Samples`).
+3. Verify the loaded routes in the DataGrid preview.
+4. Click **▶ Start Processing**.
+5. Generated PNG maps and summary spreadsheets are saved to your configured output folder.
+
+---
+
+## Command Line Interface (CLI)
+
+For headless automation, CI/CD, or batch script pipelines, use `Invoke-GoogleMapsRoute.ps1`.
+
+### 1. Manual Route with Intermediate Stops
 ```powershell
 .\Invoke-GoogleMapsRoute.ps1 `
     -StartPoint "Warszawa, Plac Defilad 1" `
@@ -88,8 +133,7 @@ Głównym skryptem CLI jest `Invoke-GoogleMapsRoute.ps1`.
     -OpenBrowser
 ```
 
-### 2. Trasa najkrótsza (Shortest)
-
+### 2. Distance-Minimizing Shortest Route
 ```powershell
 .\Invoke-GoogleMapsRoute.ps1 `
     -StartPoint "Gdańsk, Długa 1" `
@@ -98,8 +142,7 @@ Głównym skryptem CLI jest `Invoke-GoogleMapsRoute.ps1`.
     -GenerateMap
 ```
 
-### 3. Trasa ekologiczna (Eco) z wybranym silnikiem
-
+### 3. Fuel-Efficient Eco Route with Hybrid Engine
 ```powershell
 .\Invoke-GoogleMapsRoute.ps1 `
     -StartPoint "Poznań, Stary Rynek 1" `
@@ -109,88 +152,54 @@ Głównym skryptem CLI jest `Invoke-GoogleMapsRoute.ps1`.
     -GenerateMap
 ```
 
-### 4. Przetwarzanie wsadowe pliku (JSON, CSV, Excel)
-
+### 4. Batch File Processing
 ```powershell
-# Przetworzenie pliku Excel i wygenerowanie raportu zbiorczego:
+# Process Excel file and export all reports:
 .\Invoke-GoogleMapsRoute.ps1 `
-    -InputFile ".\Samples\routes_sample.xlsx" `
-    -ExportFormat Excel `
+    -InputFile ".\Samplesoutes_sample.xlsx" `
+    -ExportFormat All `
     -OutputFolder ".\Results"
-
-# Przetworzenie pliku CSV:
-.\Invoke-GoogleMapsRoute.ps1 `
-    -InputFile ".\Samples\routes_sample.csv" `
-    -RouteType Fastest `
-    -ExportFormat All
 ```
 
 ---
 
-## Schematy Plików Wejściowych
+## Compilation to Standalone Executable (.EXE)
 
-### 1. Format JSON
-
-#### Tryb A: Lista tras
-```json
-[
-  {
-    "Nazwa": "Trasa Warszawa - Kraków",
-    "Start": "Warszawa, Plac Defilad 1",
-    "Koniec": "Kraków, Rynek Główny 1",
-    "PunktyPosrednie": [
-      "Radom, Plac Konstytucji 3 Maja 1",
-      "Kielce, Sienkiewicza 1"
-    ],
-    "TypTrasy": "Fastest"
-  }
-]
-```
-
-#### Tryb B: Sekwencja przystanków jednej podróży
-```json
-[
-  { "LP": 1, "Lokalizacja": "Warszawa, Marszałkowska 1" },
-  { "LP": 2, "Lokalizacja": "Radom, Żeromskiego 1" },
-  { "LP": 3, "Lokalizacja": "Kraków, Rynek Główny 1" }
-]
-```
-
-### 2. Format CSV
-Nagłówki są rozpoznawane automatycznie w języku polskim i angielskim:
-```csv
-Nazwa;Start;Koniec;PunktyPosrednie;TypTrasy
-Trasa Katowice - Zakopane;Katowice, Rynek 1;Zakopane, Krupówki 1;Kraków, Rynek Główny 1;Fastest
-Trasa Wrocław - Opole;Wrocław, Rynek 1;Opole, Rynek 1;;Shortest
-```
-
-### 3. Format Excel (.xlsx)
-Kolumny:
-- `Nazwa` (lub `Umowa`, `ID`, `Opis`)
-- `Start` (lub `Adres A`, `Początek`, `Od`)
-- `Koniec` (lub `Adres B`, `Cel`, `Do`)
-- `PunktyPosrednie` (opcjonalnie, oddzielone znakiem `|` lub `;`)
-- `TypTrasy` (opcjonalnie: `Fastest`, `Shortest`, `Eco`)
-
----
-
-## Kompilacja do Pliku EXE
-
-Aby skompilować aplikację do samodzielnego pliku wykonywalnego `GoogleMapsRoutes.exe`:
+The project includes an automated PS2EXE compilation script: [`Build-Exe.ps1`](file:///D:/Skrypty/GoogleMapsRoutes/Build-Exe.ps1).
 
 ```powershell
+# Compile universal GoogleMapsRoutes.exe:
 .\Build-Exe.ps1 -Target GoogleMapsRoutes
+
+# Compile dedicated SchoolTransportRoutes.exe:
+.\Build-Exe.ps1 -Target SchoolTransportRoutes
 ```
 
-Skompilowany program nie wymaga uruchamiania konsoli PowerShell i może być dystrybuowany jako samodzielne narzędzie.
+### Compilation Features:
+- Automatically installs `ps2exe` from PSGallery if missing.
+- Terminates any running instances of the target `.exe` prior to compilation to prevent file lock errors.
+- Packages all XAML templates, styles, and functions into a single binary.
+- Configures `-NoConsole` and Single-Threaded Apartment (`-STA`) for smooth WPF execution.
 
 ---
 
-## Struktura Projektu
+## Project Structure
 
-- `GoogleMapsRoutes-GUI.ps1` — Główna aplikacja okienkowa WPF Dark Mode.
-- `Invoke-GoogleMapsRoute.ps1` — Skrypt wiersza poleceń (CLI).
-- `RouteMapFunctions.ps1` — Moduł silnika (geokodowanie, Routes API, Static Maps, import/eksport).
-- `Build-Exe.ps1` — Skrypt kompilatora PS2EXE.
-- `Samples/` — Przykładowe pliki testowe (`routes_sample.json`, `routes_sample.csv`, `routes_sample.xlsx`, `multipoint_trip_sample.json`).
-- `Process-SchoolTransportRoutes*` — Dedykowane skrypty dla umów na dowozy szkolne (zachowane dla kompatybilności wstecznej).
+| File / Directory | Description |
+| :--- | :--- |
+| [`GoogleMapsRoutes-GUI.ps1`](file:///D:/Skrypty/GoogleMapsRoutes/GoogleMapsRoutes-GUI.ps1) | Primary WPF Dark Mode application (Manual & Batch processing). |
+| [`GoogleMapsRoutes.exe`](file:///D:/Skrypty/GoogleMapsRoutes/GoogleMapsRoutes.exe) | Compiled standalone executable (universal routing). |
+| [`Build-Exe.ps1`](file:///D:/Skrypty/GoogleMapsRoutes/Build-Exe.ps1) | PS2EXE build script for compiling standalone executables. |
+| [`RouteMapFunctions.ps1`](file:///D:/Skrypty/GoogleMapsRoutes/RouteMapFunctions.ps1) | Shared core engine module (Geocoding, Routes v2, Static Maps, GDI+ canvas). |
+| [`Invoke-GoogleMapsRoute.ps1`](file:///D:/Skrypty/GoogleMapsRoutes/Invoke-GoogleMapsRoute.ps1) | Full-featured CLI automation script. |
+| [`Process-SchoolTransportRoutes-GUI.ps1`](file:///D:/Skrypty/GoogleMapsRoutes/Process-SchoolTransportRoutes-GUI.ps1) | Dedicated school transport contract processing GUI. |
+| [`SchoolTransportRoutes.exe`](file:///D:/Skrypty/GoogleMapsRoutes/SchoolTransportRoutes.exe) | Compiled standalone executable for school transport processing. |
+| [`localization.json`](file:///D:/Skrypty/GoogleMapsRoutes/localization.json) | External multi-language dictionary (English, Deutsch, Polski). |
+| [`Samples/`](file:///D:/Skrypty/GoogleMapsRoutes/Samples) | Sample input files (`routes_sample.json`, `routes_sample.csv`, `routes_sample.xlsx`, `multipoint_trip_sample.json`). |
+| [`.agents/skills/google-maps-routes-api/`](file:///D:/Skrypty/.agents/skills/google-maps-routes-api) | AI agent skill specification, API references, and code patterns. |
+
+---
+
+## File Encoding Standards
+
+In accordance with project guidelines, all source files (`.ps1`, `.psm1`), configuration files (`.json`), and documentation (`.md`) are strictly encoded in **UTF-8 with BOM** (`0xEF, 0xBB, 0xBF`).
