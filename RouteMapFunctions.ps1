@@ -323,7 +323,10 @@ function Get-CarRouteData {
         [Parameter()][ValidateSet('GASOLINE', 'DIESEL', 'HYBRID', 'ELECTRIC')][string]$EmissionType = 'GASOLINE',
         [Parameter()][string]$LanguageCode = 'en',
         [Parameter()][string]$Units = 'METRIC',
-        [Parameter()][switch]$TrafficAware
+        [Parameter()][switch]$TrafficAware,
+        [Parameter()][switch]$AvoidTolls,
+        [Parameter()][switch]$AvoidHighways,
+        [Parameter()][switch]$AvoidFerries
     )
 
     $RoutesUrl = 'https://routes.googleapis.com/directions/v2:computeRoutes'
@@ -380,12 +383,21 @@ function Get-CarRouteData {
             # Wymaga TRAFFIC_AWARE_OPTIMAL oraz routeModifiers.vehicleInfo
             $RequestBody['routingPreference'] = 'TRAFFIC_AWARE_OPTIMAL'
             $RequestBody['requestedReferenceRoutes'] = @('FUEL_EFFICIENT')
-            $RequestBody['routeModifiers'] = @{
-                vehicleInfo = @{
-                    emissionType = $EmissionType
-                }
-            }
         }
+    }
+
+    # Route modifiers: Avoid options (Tolls, Highways, Ferries) and Eco vehicle emission type
+    $routeModifiers = [ordered]@{}
+    if ($AvoidTolls) { $routeModifiers['avoidTolls'] = $true }
+    if ($AvoidHighways) { $routeModifiers['avoidHighways'] = $true }
+    if ($AvoidFerries) { $routeModifiers['avoidFerries'] = $true }
+    if ($RouteType -eq 'Eco') {
+        $routeModifiers['vehicleInfo'] = @{
+            emissionType = $EmissionType
+        }
+    }
+    if ($routeModifiers.Count -gt 0) {
+        $RequestBody['routeModifiers'] = $routeModifiers
     }
 
     $Headers = @{
@@ -454,6 +466,9 @@ function Get-CarRouteData {
             EncodedPolyline = $Polyline
             RouteType       = $RouteType
             RouteLabels     = $Labels
+            AvoidTolls      = [bool]$AvoidTolls
+            AvoidHighways   = [bool]$AvoidHighways
+            AvoidFerries    = [bool]$AvoidFerries
             Status          = 'OK'
             ErrorMessage    = $null
         }
@@ -468,6 +483,9 @@ function Get-CarRouteData {
             EncodedPolyline = $null
             RouteType       = $RouteType
             RouteLabels     = @()
+            AvoidTolls      = [bool]$AvoidTolls
+            AvoidHighways   = [bool]$AvoidHighways
+            AvoidFerries    = [bool]$AvoidFerries
             Status          = "EXCEPTION: $ErrorMsg"
             ErrorMessage    = $ErrorMsg
         }
@@ -645,17 +663,17 @@ function Save-RouteMapPng {
             $OverlayConfig = [PSCustomObject]@{
                 EnableTopOverlay    = $true
                 EnableBottomOverlay = $true
-                Items               = [PSCustomObject]@{
-                    StartGeocoded = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 1 }
-                    EndGeocoded   = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 2 }
-                    Distance      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Left';   Order = 3 }
-                    Duration      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Center'; Order = 3 }
-                    Timestamp     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Align = 'Right';  Order = 3 }
-                    RouteName     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Align = 'Left';   Order = 1 }
-                    RouteType     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Align = 'Right';  Order = 1 }
-                    Waypoints     = [PSCustomObject]@{ Enabled = $false; Panel = 'Bottom'; Align = 'Left';   Order = 2 }
-                    StartRaw      = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 1 }
-                    EndRaw        = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Align = 'Left';   Order = 2 }
+                Properties          = [PSCustomObject]@{
+                    RouteName     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Alignment = 'Left';   Order = 1 }
+                    RouteType     = [PSCustomObject]@{ Enabled = $true;  Panel = 'Top';    Alignment = 'Right';  Order = 1 }
+                    Timestamp     = [PSCustomObject]@{ Enabled = $false; Panel = 'Top';    Alignment = 'Right';  Order = 2 }
+                    StartGeocoded = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 1 }
+                    EndGeocoded   = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 2 }
+                    Distance      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 3 }
+                    Duration      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Center'; Order = 3 }
+                    Waypoints     = [PSCustomObject]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 4 }
+                    StartRaw      = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Alignment = 'Left';   Order = 1 }
+                    EndRaw        = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Alignment = 'Left';   Order = 2 }
                 }
             }
         }
@@ -736,22 +754,30 @@ function Save-RouteMapPng {
         $topItems = [System.Collections.Generic.List[PSCustomObject]]::new()
         $btmItems = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-        if ($OverlayConfig.Items) {
-            $propNames = if ($OverlayConfig.Items -is [System.Collections.IDictionary]) {
-                $OverlayConfig.Items.Keys
+        $overlayProps = if ($OverlayConfig.Properties) {
+            $OverlayConfig.Properties
+        } elseif ($OverlayConfig.Items) {
+            $OverlayConfig.Items
+        } else {
+            $null
+        }
+
+        if ($overlayProps) {
+            $propNames = if ($overlayProps -is [System.Collections.IDictionary]) {
+                $overlayProps.Keys
             } else {
-                $OverlayConfig.Items.PSObject.Properties.Name
+                $overlayProps.PSObject.Properties.Name
             }
             foreach ($pName in $propNames) {
-                $iCfg = if ($OverlayConfig.Items -is [System.Collections.IDictionary]) {
-                    $OverlayConfig.Items[$pName]
+                $iCfg = if ($overlayProps -is [System.Collections.IDictionary]) {
+                    $overlayProps[$pName]
                 } else {
-                    $OverlayConfig.Items.$pName
+                    $overlayProps.$pName
                 }
                 if (-not $iCfg) { continue }
                 $pEnabled = if ($null -ne $iCfg.Enabled) { [bool]$iCfg.Enabled } else { $true }
                 $pPanel   = if ($iCfg.Panel) { [string]$iCfg.Panel } else { 'None' }
-                $pAlign   = if ($iCfg.Align) { [string]$iCfg.Align } else { 'Left' }
+                $pAlign   = if ($iCfg.Alignment) { [string]$iCfg.Alignment } elseif ($iCfg.Align) { [string]$iCfg.Align } else { 'Left' }
                 $pOrder   = if ($iCfg.Order) { [int]$iCfg.Order } else { 1 }
 
                 if (-not $pEnabled -or $pPanel -eq 'None') { continue }
@@ -1085,7 +1111,11 @@ function Save-RouteMapPng {
                 $BitmapSrc.Dispose()
                 $MemStream.Dispose()
             }
-            catch { }
+            catch {
+                if (Get-Command Write-AppLog -ErrorAction SilentlyContinue) {
+                    Write-AppLog "GDI+ overlay rendering warning: $($_.Exception.Message)" "WARN"
+                }
+            }
         }
         return $true
     }
@@ -1457,3 +1487,260 @@ function Export-RouteResults {
         }
     }
 }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. ENCODED POLYLINE DECODER & GPS EXPORTERS (GPX / KML)
+# ══════════════════════════════════════════════════════════════════════════════
+
+if (-not ([System.Management.Automation.PSTypeName]'GoogleMapsPolylineDecoder').Type) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+
+public class GoogleMapsPoint {
+    public double Latitude { get; set; }
+    public double Longitude { get; set; }
+    public GoogleMapsPoint(double lat, double lng) {
+        Latitude = lat;
+        Longitude = lng;
+    }
+}
+
+public static class GoogleMapsPolylineDecoder {
+    public static List<GoogleMapsPoint> Decode(string encoded) {
+        var points = new List<GoogleMapsPoint>();
+        if (string.IsNullOrEmpty(encoded)) return points;
+
+        int index = 0, len = encoded.Length;
+        int lat = 0, lng = 0;
+
+        while (index < len) {
+            int b, shift = 0, result = 0;
+            do {
+                if (index >= len) return points;
+                b = encoded[index++] - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+            do {
+                if (index >= len) return points;
+                b = encoded[index++] - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+            lng += dlng;
+
+            points.Add(new GoogleMapsPoint(lat * 1e-5, lng * 1e-5));
+        }
+        return points;
+    }
+}
+"@ -ErrorAction SilentlyContinue
+}
+
+function ConvertFrom-GoogleEncodedPolyline {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$EncodedPolyline)
+    if ([string]::IsNullOrWhiteSpace($EncodedPolyline)) { return @() }
+    try {
+        return [GoogleMapsPolylineDecoder]::Decode($EncodedPolyline)
+    }
+    catch {
+        return @()
+    }
+}
+
+function Export-RouteGpx {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [Parameter(Mandatory = $false)][string]$RouteName = 'Route',
+        [Parameter(Mandatory = $true)][string]$EncodedPolyline,
+        [Parameter()][object[]]$Waypoints = @(),
+        [Parameter()][double]$DistanceKm = 0,
+        [Parameter()][int]$DurationMin = 0
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RouteName)) { $RouteName = 'Route' }
+    $points = ConvertFrom-GoogleEncodedPolyline -EncodedPolyline $EncodedPolyline
+    $safeName = [System.Security.SecurityElement]::Escape($RouteName)
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine('<?xml version="1.0" encoding="UTF-8"?>')
+    $null = $sb.AppendLine('<gpx version="1.1" creator="GoogleMapsRoutes" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">')
+    $null = $sb.AppendLine("  <metadata>")
+    $null = $sb.AppendLine("    <name>$safeName</name>")
+    $null = $sb.AppendLine("    <desc>Distance: $DistanceKm km, Duration: $DurationMin min</desc>")
+    $null = $sb.AppendLine("    <time>$timestamp</time>")
+    $null = $sb.AppendLine("  </metadata>")
+
+    # Export waypoints if provided
+    if ($Waypoints -and @($Waypoints).Count -gt 0) {
+        foreach ($wp in $Waypoints) {
+            if ($wp.Latitude -and $wp.Longitude) {
+                $lat = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$wp.Latitude)
+                $lng = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$wp.Longitude)
+                $wName = [System.Security.SecurityElement]::Escape($(if ($wp.Name) { [string]$wp.Name } elseif ($wp.Role) { [string]$wp.Role } else { 'Waypoint' }))
+                $wDesc = [System.Security.SecurityElement]::Escape($(if ($wp.Address) { [string]$wp.Address } else { '' }))
+                $null = $sb.AppendLine("  <wpt lat=`"$lat`" lon=`"$lng`">")
+                $null = $sb.AppendLine("    <name>$wName</name>")
+                if ($wDesc) { $null = $sb.AppendLine("    <desc>$wDesc</desc>") }
+                $null = $sb.AppendLine("  </wpt>")
+            }
+        }
+    }
+
+    # Route track
+    $null = $sb.AppendLine("  <trk>")
+    $null = $sb.AppendLine("    <name>$safeName</name>")
+    $null = $sb.AppendLine("    <trkseg>")
+    foreach ($pt in $points) {
+        $lat = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$pt.Latitude)
+        $lng = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$pt.Longitude)
+        $null = $sb.AppendLine("      <trkpt lat=`"$lat`" lon=`"$lng`" />")
+    }
+    $null = $sb.AppendLine("    </trkseg>")
+    $null = $sb.AppendLine("  </trk>")
+    $null = $sb.AppendLine("</gpx>")
+
+    $outDir = Split-Path -Parent $OutputPath
+    if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+    [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), [System.Text.UTF8Encoding]::new($true))
+    return $OutputPath
+}
+
+function Export-RouteKml {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [Parameter(Mandatory = $false)][string]$RouteName = 'Route',
+        [Parameter(Mandatory = $true)][string]$EncodedPolyline,
+        [Parameter()][object[]]$Waypoints = @(),
+        [Parameter()][double]$DistanceKm = 0,
+        [Parameter()][int]$DurationMin = 0
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RouteName)) { $RouteName = 'Route' }
+    $points = ConvertFrom-GoogleEncodedPolyline -EncodedPolyline $EncodedPolyline
+    $safeName = [System.Security.SecurityElement]::Escape($RouteName)
+
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.AppendLine('<?xml version="1.0" encoding="UTF-8"?>')
+    $null = $sb.AppendLine('<kml xmlns="http://www.opengis.net/kml/2.2">')
+    $null = $sb.AppendLine("  <Document>")
+    $null = $sb.AppendLine("    <name>$safeName</name>")
+    $null = $sb.AppendLine("    <description>Distance: $DistanceKm km, Duration: $DurationMin min</description>")
+    $null = $sb.AppendLine('    <Style id="routeStyle">')
+    $null = $sb.AppendLine('      <LineStyle>')
+    $null = $sb.AppendLine('        <color>ff0066ff</color>')
+    $null = $sb.AppendLine('        <width>4</width>')
+    $null = $sb.AppendLine('      </LineStyle>')
+    $null = $sb.AppendLine('    </Style>')
+
+    # Add stop markers
+    if ($Waypoints -and @($Waypoints).Count -gt 0) {
+        foreach ($wp in $Waypoints) {
+            if ($wp.Latitude -and $wp.Longitude) {
+                $lat = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$wp.Latitude)
+                $lng = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$wp.Longitude)
+                $wName = [System.Security.SecurityElement]::Escape($(if ($wp.Name) { [string]$wp.Name } elseif ($wp.Role) { [string]$wp.Role } else { 'Stop' }))
+                $wDesc = [System.Security.SecurityElement]::Escape($(if ($wp.Address) { [string]$wp.Address } else { '' }))
+                $null = $sb.AppendLine("    <Placemark>")
+                $null = $sb.AppendLine("      <name>$wName</name>")
+                if ($wDesc) { $null = $sb.AppendLine("      <description>$wDesc</description>") }
+                $null = $sb.AppendLine("      <Point><coordinates>$lng,$lat,0</coordinates></Point>")
+                $null = $sb.AppendLine("    </Placemark>")
+            }
+        }
+    }
+
+    # Add linestring track
+    $coordStrings = [System.Collections.Generic.List[string]]::new()
+    foreach ($pt in $points) {
+        $lat = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$pt.Latitude)
+        $lng = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:F6}", [double]$pt.Longitude)
+        $coordStrings.Add("$lng,$lat,0")
+    }
+
+    $null = $sb.AppendLine("    <Placemark>")
+    $null = $sb.AppendLine("      <name>$safeName (Route Track)</name>")
+    $null = $sb.AppendLine("      <styleUrl>#routeStyle</styleUrl>")
+    $null = $sb.AppendLine("      <LineString>")
+    $null = $sb.AppendLine("        <tessellate>1</tessellate>")
+    $null = $sb.AppendLine("        <coordinates>$($coordStrings -join ' ')</coordinates>")
+    $null = $sb.AppendLine("      </LineString>")
+    $null = $sb.AppendLine("    </Placemark>")
+    $null = $sb.AppendLine("  </Document>")
+    $null = $sb.AppendLine("</kml>")
+
+    $outDir = Split-Path -Parent $OutputPath
+    if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+    [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), [System.Text.UTF8Encoding]::new($true))
+    return $OutputPath
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. GOOGLE MAPS PLATFORM API USAGE & COST ESTIMATION HELPER
+# ══════════════════════════════════════════════════════════════════════════════
+
+function Get-EstimatedApiCost {
+    [CmdletBinding()]
+    param(
+        [Parameter()][int]$GeocodingCalls = 0,
+        [Parameter()][int]$RoutesBasicCalls = 0,
+        [Parameter()][int]$RoutesAdvancedCalls = 0,
+        [Parameter()][int]$StaticMapsCalls = 0,
+        [Parameter()][ValidateSet('USD', 'EUR', 'PLN')][string]$Currency = 'USD',
+        [Parameter()][double]$UsdToEur = 0.92,
+        [Parameter()][double]$UsdToPln = 3.95,
+        [Parameter()][double]$MonthlyFreeCreditUsd = 200.0
+    )
+
+    # Google Maps Platform Standard Tier Pricing:
+    # - Geocoding API: $0.005 per call ($5.00 / 1000)
+    # - Routes API (ComputeRoutes Basic): $0.005 per call ($5.00 / 1000)
+    # - Routes API (ComputeRoutes Advanced/Traffic): $0.010 per call ($10.00 / 1000)
+    # - Maps Static API: $0.002 per call ($2.00 / 1000)
+    $costGeo     = $GeocodingCalls * 0.005
+    $costBasic   = $RoutesBasicCalls * 0.005
+    $costAdv     = $RoutesAdvancedCalls * 0.010
+    $costStatic  = $StaticMapsCalls * 0.002
+
+    $totalCostUsd = [math]::Round($costGeo + $costBasic + $costAdv + $costStatic, 4)
+    $freeRemainingUsd = [math]::Max(0.0, [math]::Round($MonthlyFreeCreditUsd - $totalCostUsd, 2))
+
+    $rate = switch ($Currency) {
+        'EUR' { $UsdToEur }
+        'PLN' { $UsdToPln }
+        default { 1.0 }
+    }
+    $totalCostLocal = [math]::Round($totalCostUsd * $rate, 2)
+    $symbol = switch ($Currency) {
+        'EUR' { '€' }
+        'PLN' { 'zł' }
+        default { '$' }
+    }
+
+    return [PSCustomObject]@{
+        TotalCalls          = ($GeocodingCalls + $RoutesBasicCalls + $RoutesAdvancedCalls + $StaticMapsCalls)
+        GeocodingCalls      = $GeocodingCalls
+        RoutesBasicCalls    = $RoutesBasicCalls
+        RoutesAdvancedCalls = $RoutesAdvancedCalls
+        StaticMapsCalls     = $StaticMapsCalls
+        CostUsd             = $totalCostUsd
+        CostLocal           = $totalCostLocal
+        Currency            = $Currency
+        CurrencySymbol      = $symbol
+        FormattedCost       = "$totalCostLocal $symbol"
+        FreeTierRemaining   = "$freeRemainingUsd $"
+        IsWithinFreeCredit  = ($totalCostUsd -le $MonthlyFreeCreditUsd)
+    }
+}
+
