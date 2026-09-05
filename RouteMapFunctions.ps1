@@ -1,35 +1,36 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Wspólne funkcje do geokodowania adresów, obliczania tras (Fastest, Shortest, Eco)
-    oraz generowania map PNG i obsługi plików danych (JSON, CSV, Excel).
+    Shared functions for address geocoding, route calculation (Fastest, Shortest, Eco),
+    static PNG map rendering, and multi-format data file processing (JSON, CSV, Excel).
 
 .DESCRIPTION
-    Moduł funkcji wykorzystywany przez:
+    Function library utilized by:
       - GoogleMapsRoutes-GUI.ps1
       - Invoke-GoogleMapsRoute.ps1
       - Get-CarRoute_WithMap.ps1
       - Get-MultiPointCarRoute_WithMap.ps1
       - Process-SchoolTransportRoutes.ps1
 
-    Główne funkcje:
-      - Select-InputDataFile / Select-InputExcel : Dialogi wyboru plików
-      - Protect-SecretString / Unprotect-SecretString : Bezpieczne przechowywanie klucza API (DPAPI)
-      - Test-GoogleApiKey : Weryfikacja poprawności klucza API
-      - Get-AddressCoordinates : Geokodowanie adresu przez Google Geocoding API
-      - Get-CarRouteData : Obliczanie trasy przez Google Routes API v2 (Fastest, Shortest, Eco, multipoint)
-      - Get-GoogleMapsUrl : Generowanie linku do Google Maps
-      - Save-RouteMapPng : Pobieranie mapy z Google Static Maps API z wieloma znacznikami i nakładką
-      - Import-RouteDataFile : Uniwersalny import tras z JSON, CSV, Excel (XLSX, XLS)
-      - Export-RouteResults : Uniwersalny eksport wyników do Excel, CSV, JSON
+    Core Functions:
+      - Select-InputDataFile / Select-InputExcel : Interactive file selection dialogs
+      - Protect-SecretString / Unprotect-SecretString : Secure DPAPI per-user API key encryption
+      - Test-GoogleApiKey : Non-blocking API key validity verification
+      - Get-AddressCoordinates : Address geocoding via Google Geocoding API
+      - Get-GeocodeStatusDescription : Detailed geocode accuracy and fallback status resolver
+      - Get-CarRouteData : Route calculation via Google Routes API v2 (Fastest, Shortest, Eco, multipoint)
+      - Get-GoogleMapsUrl : Navigation URL generator for Google Maps in web browser
+      - Save-RouteMapPng : Map image retrieval via Google Static Maps API with markers and overlay banners
+      - Import-RouteDataFile : Universal route data loader for JSON, CSV, and Excel (XLSX, XLS)
+      - Export-RouteResults : Universal route and waypoint exporter for Excel, CSV, and JSON
 
 .NOTES
-    Wymagana zmienna środowiskowa GOOGLE_MAPS_API_KEY lub parametr -ApiKey.
+    Requires GOOGLE_MAPS_API_KEY environment variable or -ApiKey parameter.
     Encoding: UTF-8 with BOM
 #>
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. DIALOGI I BEZPIECZEŃSTWO (DPAPI)
+# 1. DIALOGS AND SECURITY (DPAPI)
 # ══════════════════════════════════════════════════════════════════════════════
 
 function Select-InputExcel {
@@ -138,7 +139,7 @@ function Test-GoogleApiKey {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 2. GEOKODOWANIE ADRESÓW (GOOGLE GEOCODING API)
+# 2. ADDRESS GEOCODING (GOOGLE GEOCODING API)
 # ══════════════════════════════════════════════════════════════════════════════
 
 function Get-AddressComponentValue {
@@ -306,7 +307,7 @@ function Get-GeocodeStatusDescription {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 3. OBLICZANIE TRAS (GOOGLE ROUTES API v2)
+# 3. ROUTE CALCULATION (GOOGLE ROUTES API v2)
 # ══════════════════════════════════════════════════════════════════════════════
 
 function Get-CarRouteData {
@@ -509,7 +510,7 @@ function Get-GoogleMapsUrl {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. GENEROWANIE I ZAPIS MAPY PNG (GOOGLE STATIC MAPS API + GDI+ NAKŁADKA)
+# 4. PNG MAP GENERATION AND RENDERING (GOOGLE STATIC MAPS API + GDI+ OVERLAY)
 # ══════════════════════════════════════════════════════════════════════════════
 
 function Get-WrappedLines {
@@ -1184,7 +1185,7 @@ function Import-RouteDataFile {
     # Analiza kolumn pierwszego wiersza
     $PropNames = @($RawRows[0].PSObject.Properties.Name)
 
-    # 1. Sprawdzamy czy plik to sekwencja punktów jednej trasy wielopunktowej (SequentialStops)
+    # 1. Check if file represents a sequential waypoint sequence for a single route (SequentialStops)
     # np. kolumny: LP / Kolejnosc + Adres / Lokalizacja
     $ColSeq = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @('^(lp|l\.p\.|kolejnosc|stop|sequence|order|nr)$')
     $ColAddrSeq = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @('^(adres|address|lokalizacja|punkt|miejsce)$', 'lokalizacja.*(odbioru|dowozu)', 'adres.*(odbioru|dowozu)')
@@ -1237,7 +1238,7 @@ function Import-RouteDataFile {
         }
     }
 
-    # 2. Tryb RouteList (każdy wiersz to osobna trasa)
+    # 2. RouteList Mode (each row is a separate route)
     $ColStart = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @(
         '(?i)^(start|origin|startpoint|poczat.*|poczatek|od|from|dom)$',
         '(?i)adres.*a|^a$',
@@ -1331,7 +1332,7 @@ function Import-RouteDataFile {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. UNIWERSALNY EKSPORT WYNIKÓW (EXCEL, CSV, JSON)
+# 6. UNIVERSAL RESULTS EXPORT (EXCEL, CSV, JSON)
 # ══════════════════════════════════════════════════════════════════════════════
 
 function Export-RouteResults {

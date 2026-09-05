@@ -1,64 +1,80 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Oblicza trasę Google Maps dla parametrów ręcznych lub pliku danych (JSON, CSV, Excel).
+    Calculates Google Maps driving routes from manual parameters or data files (JSON, CSV, Excel).
 
 .DESCRIPTION
-    Skrypt umożliwia:
-      1. Ręczne podanie punktu początkowego, końcowego oraz opcjonalnych punktów pośrednich
-      2. Wczytanie pliku danych (JSON, CSV, Excel) z listą tras lub sekwencją przystanków
-      3. Wybór optymalizacji: Najszybsza (Fastest), Najkrótsza (Shortest), Ekologiczna (Eco / Fuel Efficient)
-      4. Geokodowanie adresów przez Google Geocoding API
-      5. Obliczanie trasy przez Google Routes API v2
-      6. Generowanie mapy PNG z naniesioną trasą i znacznikami
-      7. Generowanie interaktywnego linku Google Maps
-      8. Zapisywanie raportów zbiorczych (Excel, CSV, JSON)
+    The script provides:
+      1. Manual route calculation between origin, destination, and optional waypoints
+      2. Batch loading of data files (JSON, CSV, Excel) with route lists or stop sequences
+      3. Route optimization modes: Fastest (travel time), Shortest (distance), Eco-friendly (fuel/energy efficiency)
+      4. Address geocoding using Google Geocoding API
+      5. Route computation using Google Routes API v2
+      6. High-resolution PNG map rendering with highlighted polyline and numbered markers
+      7. Interactive Google Maps navigation URL generation
+      8. Comprehensive batch summary export (Excel, CSV, JSON)
 
 .PARAMETER StartPoint
-    Adres lub współrzędne punktu startowego (np. "Warszawa, Marszałkowska 1" lub "52.2297, 21.0122").
+    Address or latitude/longitude coordinates of origin (e.g., "Warszawa, Marszałkowska 1" or "52.2297, 21.0122").
 
 .PARAMETER EndPoint
-    Adres lub współrzędne punktu docelowego.
+    Address or latitude/longitude coordinates of destination.
 
 .PARAMETER Waypoints
-    Lista adresów lub współrzędnych punktów pośrednich (do 25 punktów).
+    Array of addresses or coordinates for intermediate stops (up to 25 waypoints).
+
+.PARAMETER Name
+    Descriptive name or label for manual route.
 
 .PARAMETER RouteType
-    Typ trasy:
-      - 'Fastest': Najszybsza czasowo
-      - 'Shortest': Najkrótsza pod kątem odległości (km)
-      - 'Eco': Ekologiczna / najniższe zużycie paliwa/energii
+    Route optimization mode:
+      - 'Fastest': Optimized for shortest travel duration
+      - 'Shortest': Optimized for shortest physical travel distance (km)
+      - 'Eco': Optimized for lowest fuel or energy consumption
+      - 'FromSource': Inherited from input data file or default
 
 .PARAMETER EmissionType
-    Typ napędu dla trasy Eco: 'GASOLINE', 'DIESEL', 'HYBRID', 'ELECTRIC'. Domyślnie 'GASOLINE'.
+    Vehicle powertrain type for Eco routes: 'GASOLINE', 'DIESEL', 'HYBRID', 'ELECTRIC'. Default: 'GASOLINE'.
 
 .PARAMETER InputFile
-    Ścieżka do pliku wejściowego (.xlsx, .xls, .csv, .tsv, .json).
+    Path to input route data file (.xlsx, .xls, .csv, .tsv, .json).
+
+.PARAMETER ExportFormat
+    Export report format for batch processing: 'Excel', 'CSV', 'JSON', 'All', 'None'. Default: 'Excel'.
 
 .PARAMETER ApiKey
-    Klucz Google Maps API. Jeśli nie podano, pobierany ze zmiennej GOOGLE_MAPS_API_KEY lub DPAPI.
+    Google Maps API key. If omitted, resolved from GOOGLE_MAPS_API_KEY environment variable or DPAPI storage.
 
 .PARAMETER OutputFolder
-    Folder zapisu wygenerowanych map PNG i raportów. Domyślnie .\Results
+    Output directory for generated PNG maps and export files. Default: .\Results
 
 .PARAMETER GenerateMap
-    Przełącznik określający czy generować mapę statyczną PNG. Domyślnie włączony ($true).
+    Switch indicating whether to download and render static PNG maps. Default: $true.
+
+.PARAMETER MapWidth
+    Width of the rendered PNG map in pixels (100-2048). Default: 900.
+
+.PARAMETER MapHeight
+    Height of the rendered PNG map in pixels (100-2048). Default: 600.
+
+.PARAMETER TrafficAware
+    Switch indicating whether to incorporate live real-time traffic conditions into route calculation.
 
 .PARAMETER OpenBrowser
-    Otwiera wygenerowaną trasę w przeglądarce internetowej.
+    Switch indicating whether to open the calculated route in the default web browser.
 
 .EXAMPLE
-    # Trasa z punktami pośrednimi (Najszybsza)
+    # Fastest route with intermediate waypoints
     .\Invoke-GoogleMapsRoute.ps1 -StartPoint "Warszawa, Marszałkowska 1" -EndPoint "Kraków, Rynek Główny 1" `
         -Waypoints "Radom, Żeromskiego 5", "Kielce, Sienkiewicza 10" -RouteType Fastest -GenerateMap
 
 .EXAMPLE
-    # Trasa najkrótsza
+    # Shortest distance route
     .\Invoke-GoogleMapsRoute.ps1 -StartPoint "Gdańsk, Długa 1" -EndPoint "Toruń, Szeroka 1" -RouteType Shortest
 
 .EXAMPLE
-    # Przetwarzanie wsadowe pliku Excel lub JSON
-    .\Invoke-GoogleMapsRoute.ps1 -InputFile ".\Samples\routes_sample.xlsx" -RouteType Fastest -ExportFormat Excel
+    # Batch processing of Excel or JSON data file
+    .\Invoke-GoogleMapsRoute.ps1 -InputFile ".\Samplesoutes_sample.xlsx" -RouteType Fastest -ExportFormat Excel
 
 .NOTES
     Encoding: UTF-8 with BOM
@@ -66,7 +82,7 @@
 
 [CmdletBinding(DefaultParameterSetName = 'Manual')]
 param(
-    # --- Zestaw parametrów: Manual ---
+    # --- Parameter Set: Manual ---
     [Parameter(Mandatory = $true, ParameterSetName = 'Manual', Position = 0)]
     [string]$StartPoint,
 
@@ -77,9 +93,9 @@ param(
     [string[]]$Waypoints = @(),
 
     [Parameter(Mandatory = $false, ParameterSetName = 'Manual')]
-    [string]$Name = 'Trasa manualna',
+    [string]$Name = 'Manual Route',
 
-    # --- Zestaw parametrów: File ---
+    # --- Parameter Set: File ---
     [Parameter(Mandatory = $true, ParameterSetName = 'File', Position = 0)]
     [string]$InputFile,
 
@@ -87,7 +103,7 @@ param(
     [ValidateSet('Excel', 'CSV', 'JSON', 'All', 'None')]
     [string]$ExportFormat = 'Excel',
 
-    # --- Parametry wspólne ---
+    # --- Common Parameters ---
     [Parameter(Mandatory = $false)]
     [ValidateSet('Fastest', 'Shortest', 'Eco', 'FromSource')]
     [string]$RouteType = 'Fastest',
@@ -123,16 +139,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Załadowanie wspólnych funkcji
+# Load shared functions library
 $FunctionsPath = Join-Path $PSScriptRoot 'RouteMapFunctions.ps1'
 if (-not (Test-Path $FunctionsPath)) {
-    throw "Nie odnaleziono pliku modułu funkcji: $FunctionsPath"
+    throw "Shared functions library file not found: $FunctionsPath"
 }
 . $FunctionsPath
 
-# Ustalenie klucza API
+# Resolve API key
 if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-    # Próba odczytania z konfiguracji lokalnej DPAPI
+    # Attempt resolution from local DPAPI configuration
     $AppDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'GoogleMapsRoutes'
     $CfgFile = Join-Path $AppDir 'config.json'
     if (Test-Path $CfgFile) {
@@ -150,7 +166,7 @@ if ([string]::IsNullOrWhiteSpace($ApiKey)) {
     throw "Brak klucza Google Maps API. Ustaw zmienną środowiskową GOOGLE_MAPS_API_KEY lub przekaż parametr -ApiKey."
 }
 
-# Ustalenie folderu wyjściowego
+# Resolve output folder
 if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
     $OutputFolder = Join-Path $PSScriptRoot 'Results'
 }
@@ -161,7 +177,7 @@ if (-not (Test-Path $OutputFolder)) {
 $Timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TRYB 1: RĘCZNE PARAMETRY (MANUAL)
+# MODE 1: MANUAL PARAMETERS (MANUAL)
 # ══════════════════════════════════════════════════════════════════════════════
 if ($PSCmdlet.ParameterSetName -eq 'Manual') {
     Write-Host "`n[Google Maps Routes] Rozpoczynanie obliczania trasy..." -ForegroundColor Cyan
@@ -194,7 +210,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Manual') {
     }
     Write-Host "  OK: $($GeoEnd.FormattedAddress) ($($GeoEnd.Latitude), $($GeoEnd.Longitude))" -ForegroundColor Green
 
-    # Geokodowanie Punktów Pośrednich
+    # Geocoding Waypoints
     $GeocodedWaypoints = [System.Collections.Generic.List[PSCustomObject]]::new()
     if ($Waypoints -and $Waypoints.Count -gt 0) {
         $idx = 1
@@ -311,7 +327,7 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
         Write-Host "  Start: $($r.Start)" -ForegroundColor White
         Write-Host "  Cel  : $($r.End)" -ForegroundColor White
 
-        # Wybór RouteType dla wiersza
+        # Resolve RouteType for row
         $RowRouteType = if ($RouteType -ne 'FromSource') {
             $RouteType
         }
@@ -404,7 +420,7 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                 continue
             }
 
-            # Geokodowanie Punktów Pośrednich
+            # Geocoding Waypoints
             $GeocodedWaypoints = [System.Collections.Generic.List[PSCustomObject]]::new()
             $WpIdx = 1
             if ($r.Waypoints -and $r.Waypoints.Count -gt 0) {

@@ -1,46 +1,46 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Oblicza najkrótszą trasę samochodem osobowym pomiędzy adresami A i B z pliku Excel.
+    Calculates shortest passenger car routes between addresses A and B from an Excel file.
 
 .DESCRIPTION
-    Skrypt wczytuje plik Excel z kolumnami "Adres A" i "Adres B", geokoduje adresy
-    przez Google Geocoding API, oblicza najkrótszą trasę (samochód osobowy) przez
-    Google Routes API v2, zapisuje wyniki (odległość km, czas) do pliku Excel oraz
-    generuje mapę PNG dla każdej trasy przez Google Static Maps API.
+    Loads an Excel file containing origin ("Adres A") and destination ("Adres B") columns,
+    geocodes addresses via Google Geocoding API, computes the shortest driving route using
+    Google Routes API v2, exports results (distance km, duration) to Excel, and downloads
+    static PNG route maps via Google Static Maps API.
 
 .PARAMETER ApiKey
-    Klucz Google Maps API. Domyślnie pobierany ze zmiennej środowiskowej GOOGLE_MAPS_API_KEY.
+    Google Maps API key. Default: resolved from GOOGLE_MAPS_API_KEY environment variable.
 
 .PARAMETER InputExcel
-    Ścieżka do pliku Excel wejściowego. Jeśli nie podano, otwiera się dialog wyboru pliku.
+    Path to input Excel file. If omitted, an interactive file picker dialog opens.
 
 .PARAMETER OutputFolder
-    Folder wynikowy dla Excel i PNG. Domyślnie D:\!zrobic\
+    Output directory for Excel results and PNG maps. Default: D:\!zrobic\
 
 .PARAMETER KolumnaAdresA
-    Nazwa kolumny z adresem A w pliku Excel. Domyślnie "Adres A".
+    Column header name for origin address in Excel. Default: "Adres A".
 
 .PARAMETER KolumnaAdresB
-    Nazwa kolumny z adresem B w pliku Excel. Domyślnie "Adres B".
+    Column header name for destination address in Excel. Default: "Adres B".
 
 .PARAMETER MapWidth
-    Szerokość mapy PNG w pikselach. Domyślnie 900.
+    Rendered PNG map width in pixels. Default: 900.
 
 .PARAMETER MapHeight
-    Wysokość mapy PNG w pikselach. Domyślnie 600.
+    Rendered PNG map height in pixels. Default: 600.
 
 .EXAMPLE
     .\Get-CarRoute_WithMap.ps1
-    Uruchamia skrypt z dialogiem wyboru pliku.
+    Launches script with interactive file picker dialog.
 
 .EXAMPLE
-    .\Get-CarRoute_WithMap.ps1 -InputExcel "C:\adresy.xlsx" -OutputFolder "C:\wyniki"
-    Przetwarza podany plik Excel i zapisuje wyniki w podanym folderze.
+    .\Get-CarRoute_WithMap.ps1 -InputExcel "C:\addresses.xlsx" -OutputFolder "C:\results"
+    Processes specified Excel file and saves results to target folder.
 
 .NOTES
-    Wymagane moduły: ImportExcel
-    Wymagana zmienna środowiskowa: GOOGLE_MAPS_API_KEY lub parametr -ApiKey
+    Required modules: ImportExcel
+    Required environment variable: GOOGLE_MAPS_API_KEY or -ApiKey parameter
     Encoding: UTF-8 with BOM
 #>
 [CmdletBinding()]
@@ -72,49 +72,49 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Inicjalizacja
+# Initialization
 if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-    throw "Brak klucza Google Maps API. Ustaw zmienną środowiskową GOOGLE_MAPS_API_KEY lub podaj parametr -ApiKey."
+    throw "Missing Google Maps API key. Set GOOGLE_MAPS_API_KEY environment variable or pass -ApiKey."
 }
 
 if (-not (Test-Path -Path $OutputFolder)) {
     New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
-    Write-Verbose "Utworzono folder wynikowy: $OutputFolder"
+    Write-Verbose "Created output folder: $OutputFolder"
 }
 
 $DateStamp = Get-Date -Format 'yyyyMMdd_HHmm'
 
-# ── Import wspólnych funkcji (Get-AddressCoordinates, Get-CarRouteData, Save-RouteMapPng, Select-InputExcel) ──
+# ── Import shared functions (Get-AddressCoordinates, Get-CarRouteData, Save-RouteMapPng, Select-InputExcel) ──
 . "$PSScriptRoot\RouteMapFunctions.ps1"
 
-# Wybor pliku wejsciowego
+# Select input file
 if ([string]::IsNullOrWhiteSpace($InputExcel)) {
-    Write-Host "Otwieranie dialogu wyboru pliku Excel..." -ForegroundColor Cyan
+    Write-Host "Opening Excel file selection dialog..." -ForegroundColor Cyan
     $InputExcel = Select-InputExcel
     if ([string]::IsNullOrWhiteSpace($InputExcel)) {
-        Write-Warning "Nie wybrano pliku. Skrypt zakonczony."
+        Write-Warning "No file selected. Script terminated."
         exit 0
     }
 }
 
-if (-not (Test-Path -Path $InputExcel)) { throw "Plik wejsciowy nie istnieje: $InputExcel" }
+if (-not (Test-Path -Path $InputExcel)) { throw "Input file does not exist: $InputExcel" }
 
-Write-Host "Wczytywanie pliku: $InputExcel" -ForegroundColor Cyan
+Write-Host "Loading file: $InputExcel" -ForegroundColor Cyan
 
 try {
     $Dane = Import-Excel -Path $InputExcel
 }
 catch {
-    throw "Nie mozna wczytac pliku Excel. Upewnij sie ze modul ImportExcel jest zainstalowany. Blad: $($_.Exception.Message)"
+    throw "Cannot load Excel file. Ensure ImportExcel module is installed. Error: $($_.Exception.Message)"
 }
 
 if ($null -eq $Dane -or @($Dane).Count -eq 0) {
-    Write-Warning "Plik Excel jest pusty lub nie zawiera danych."
+    Write-Warning "Excel file is empty or contains no rows."
     exit 0
 }
 
 $Headers = $Dane[0].PSObject.Properties.Name
-Write-Verbose "Kolumny w pliku: $($Headers -join ', ')"
+Write-Verbose "Columns in file: $($Headers -join ', ')"
 
 $ColA = $Headers | Where-Object { $_ -like $KolumnaAdresA } | Select-Object -First 1
 $ColB = $Headers | Where-Object { $_ -like $KolumnaAdresB } | Select-Object -First 1
@@ -122,11 +122,11 @@ if (-not $ColA) { $ColA = $Headers | Where-Object { $_ -match 'adres.*a$|^a$|adr
 if (-not $ColB) { $ColB = $Headers | Where-Object { $_ -match 'adres.*b$|^b$|adres_b|adresb' } | Select-Object -First 1 }
 
 if (-not $ColA -or -not $ColB) {
-    Write-Warning "Dostepne kolumny: $($Headers -join ', ')"
-    throw "Nie mozna odnalezc kolumn adresowych. Uzyj parametrow -KolumnaAdresA i -KolumnaAdresB."
+    Write-Warning "Available columns: $($Headers -join ', ')"
+    throw "Cannot find address columns. Use -KolumnaAdresA and -KolumnaAdresB parameters."
 }
 
-Write-Host "Znalezione kolumny: '$ColA' i '$ColB'" -ForegroundColor Green
+Write-Host "Found columns: '$ColA' and '$ColB'" -ForegroundColor Green
 
 $Wyniki = [System.Collections.Generic.List[PSCustomObject]]::new()
 $RowIndex = 0
@@ -172,7 +172,7 @@ foreach ($Row in $Dane) {
         continue
     }
 
-    # Geokodowanie A
+    # Geocode Address A
     $GeoA = Get-AddressCoordinates -Address $AdresA -ApiKey $ApiKey -RequireStreetNumber
     $Wynik.StatusGeokodowaniaA = $GeoA.Status
     $Wynik.AdresA_Geokodowany  = $GeoA.FormattedAddress
@@ -188,7 +188,7 @@ foreach ($Row in $Dane) {
         $Wyniki.Add($Wynik); Start-Sleep -Milliseconds 200; continue
     }
 
-    # Geokodowanie B
+    # Geocode Address B
     $GeoB = Get-AddressCoordinates -Address $AdresB -ApiKey $ApiKey -RequireStreetNumber
     $Wynik.StatusGeokodowaniaB = $GeoB.Status
     $Wynik.AdresB_Geokodowany  = $GeoB.FormattedAddress

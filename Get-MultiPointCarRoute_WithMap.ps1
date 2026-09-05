@@ -1,20 +1,49 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Tworzy jedna trase samochodowa przez wiele punktow z pliku Excel.
+    Generates a single multi-stop driving route through multiple waypoints from an Excel file.
 
 .DESCRIPTION
-    Wczytuje punkty z kolumn LP, Miejscowosc i Lokalizacja miejsca odbioru lub dowozu.
-    Punkty sa odwiedzane w kolejnosci LP. Skrypt geokoduje adresy, oblicza laczna
-    odleglosc i czas, generuje mape PNG, podsumowanie Excel oraz link Google Maps.
+    Reads points from columns LP, Miejscowosc, and pickup/dropoff location.
+    Stops are visited in order of LP. The script geocodes addresses, computes
+    total distance and duration, generates a PNG route map, an Excel summary,
+    and an interactive Google Maps URL.
+
+.PARAMETER ApiKey
+    Google Maps API key. Default: resolved from GOOGLE_MAPS_API_KEY environment variable.
+
+.PARAMETER InputExcel
+    Path to input Excel file. If omitted, an interactive file picker dialog opens.
+
+.PARAMETER OutputFolder
+    Output directory for generated route maps and summaries. Default: C:\Temp\MultiPointRoute
+
+.PARAMETER KolumnaLP
+    Column header name for stop sequence number in Excel. Default: "LP".
+
+.PARAMETER KolumnaMiejscowosc
+    Column header name for locality/city in Excel. Default: "Miejscowosc".
+
+.PARAMETER KolumnaLokalizacja
+    Column header name for stop location description in Excel. Default: "Lokalizacja miejsca odbioru lub dowozu".
+
+.PARAMETER Kraj
+    Country name appended to geocoding queries. Default: "Polska".
+
+.PARAMETER MapWidth
+    Rendered PNG map width in pixels (100-2048). Default: 900.
+
+.PARAMETER MapHeight
+    Rendered PNG map height in pixels (100-2048). Default: 600.
 
 .EXAMPLE
-    .\Get-MultiPointCarRoute_WithMap.ps1 -InputExcel "C:\Temp\punkty.xlsx"
+    .\Get-MultiPointCarRoute_WithMap.ps1 -InputExcel "C:\Temp\points.xlsx"
 
 .NOTES
-    Wymagany modul: ImportExcel
-    Wymagana zmienna srodowiskowa GOOGLE_MAPS_API_KEY lub parametr -ApiKey.
-    Google Routes API obsluguje maksymalnie 25 punktow posrednich (27 punktow lacznie).
+    Required module: ImportExcel
+    Required environment variable: GOOGLE_MAPS_API_KEY or -ApiKey parameter.
+    Google Routes API supports up to 25 intermediate waypoints (27 points total).
+    Encoding: UTF-8 with BOM
 #>
 [CmdletBinding()]
 param(
@@ -33,22 +62,22 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-    throw 'Brak klucza Google Maps API. Ustaw GOOGLE_MAPS_API_KEY lub podaj parametr -ApiKey.'
+    throw 'Missing Google Maps API key. Set GOOGLE_MAPS_API_KEY environment variable or pass -ApiKey parameter.'
 }
 
 . "$PSScriptRoot\RouteMapFunctions.ps1"
 
 if ([string]::IsNullOrWhiteSpace($InputExcel)) {
-    Write-Host 'Otwieranie dialogu wyboru pliku Excel...' -ForegroundColor Cyan
+    Write-Host 'Opening Excel file selection dialog...' -ForegroundColor Cyan
     $InputExcel = Select-InputExcel
     if ([string]::IsNullOrWhiteSpace($InputExcel)) {
-        Write-Warning 'Nie wybrano pliku. Skrypt zakonczony.'
+        Write-Warning 'No file selected. Script terminated.'
         exit 0
     }
 }
 
 if (-not (Test-Path -LiteralPath $InputExcel -PathType Leaf)) {
-    throw "Plik wejsciowy nie istnieje: $InputExcel"
+    throw "Input file does not exist: $InputExcel"
 }
 if (-not (Test-Path -LiteralPath $OutputFolder)) {
     New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null

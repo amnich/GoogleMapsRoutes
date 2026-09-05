@@ -245,9 +245,9 @@ $locJsonRaw
 
         $existingPattern = '(?s)# ==============================================================================\s*# BUNDLER: EMBEDDED LOCALIZATION CATALOG.*?\r?\n''@'
         if ($bundled -match $existingPattern) {
-            $bundled = [regex]::Replace($bundled, $existingPattern, $embeddedBlock)
+            $bundled = [regex]::Replace($bundled, $existingPattern, [System.Text.RegularExpressions.MatchEvaluator]{ $embeddedBlock })
         } elseif ($bundled -match '(?m)^\s*function\s+Load-LocalizationConfig\b') {
-            $bundled = [regex]::Replace($bundled, '(?m)^\s*function\s+Load-LocalizationConfig\b', "$embeddedBlock`r`n`r`nfunction Load-LocalizationConfig")
+            $bundled = [regex]::Replace($bundled, '(?m)^\s*function\s+Load-LocalizationConfig\b', [System.Text.RegularExpressions.MatchEvaluator]{ "$embeddedBlock`r`n`r`nfunction Load-LocalizationConfig" })
         } else {
             $bundled = "$embeddedBlock`r`n`r`n$bundled"
         }

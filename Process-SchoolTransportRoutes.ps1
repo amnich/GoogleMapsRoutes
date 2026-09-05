@@ -1,40 +1,40 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Przetwarza umowy na dowozy szkolne — generuje mapy tras i podsumowania Excel.
+    Processes school transport contracts — generates route maps and Excel distance summaries.
 
 .DESCRIPTION
-    Skrypt wczytuje plik Excel z kolumnami: Umowa, Szkoła, Dom, Praca, Tryb, Wariant.
-    Dla każdej umowy tworzy osobny folder w OutputFolder, generuje mapy PNG tras
-    (Dom↔Szkoła, opcjonalnie z Pracą) oraz plik Excel z podsumowaniem odległości.
-    Na końcu tworzy zbiorczy Excel ze wszystkimi umowami.
+    Loads an Excel file with contract columns: Umowa (Contract), Szkoła (School), Dom (Home),
+    Praca (Work), Tryb (Mode), and Wariant (Variant).
+    Creates a dedicated subfolder per contract, renders PNG route maps (Home<->School, optional Work stop),
+    and generates an individual Excel summary. At completion, creates a consolidated Excel workbook for all contracts.
 
 .PARAMETER ApiKey
-    Klucz Google Maps API. Domyślnie pobierany ze zmiennej środowiskowej GOOGLE_MAPS_API_KEY.
+    Google Maps API key. Default: resolved from GOOGLE_MAPS_API_KEY environment variable.
 
 .PARAMETER InputExcel
-    Ścieżka do pliku Excel wejściowego. Jeśli nie podano, otwiera się dialog wyboru pliku.
+    Path to input Excel file. If omitted, an interactive file picker dialog opens.
 
 .PARAMETER OutputFolder
-    Folder wynikowy dla podfolderów umów. Domyślnie C:\Temp\SchoolRoutes
+    Output directory for contract subfolders. Default: C:\Temp\SchoolRoutes
 
 .PARAMETER MapWidth
-    Szerokość mapy PNG w pikselach. Domyślnie 900.
+    Rendered PNG map width in pixels (100-2048). Default: 900.
 
 .PARAMETER MapHeight
-    Wysokość mapy PNG w pikselach. Domyślnie 600.
+    Rendered PNG map height in pixels (100-2048). Default: 600.
 
 .EXAMPLE
     .\Process-SchoolTransportRoutes.ps1
-    Uruchamia skrypt z dialogiem wyboru pliku.
+    Launches script with interactive file picker dialog.
 
 .EXAMPLE
-    .\Process-SchoolTransportRoutes.ps1 -InputExcel "C:\dane_umow.xlsx" -OutputFolder "C:\wyniki"
-    Przetwarza podany plik Excel i zapisuje wyniki w podanym folderze.
+    .\Process-SchoolTransportRoutes.ps1 -InputExcel "C:\contract_data.xlsx" -OutputFolder "C:\results"
+    Processes specified contract Excel file and outputs results to target directory.
 
 .NOTES
-    Wymagane moduły: ImportExcel
-    Wymagana zmienna środowiskowa: GOOGLE_MAPS_API_KEY lub parametr -ApiKey
+    Required modules: ImportExcel
+    Required environment variable: GOOGLE_MAPS_API_KEY or -ApiKey parameter
     Encoding: UTF-8 with BOM
 #>
 [CmdletBinding()]
@@ -60,12 +60,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ── Walidacja klucza API ──────────────────────────────────────────────────────
+# ── Validate API Key ──────────────────────────────────────────────────────────
 if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-    throw "Brak klucza Google Maps API. Ustaw zmienną środowiskową GOOGLE_MAPS_API_KEY lub podaj parametr -ApiKey."
+    throw "Missing Google Maps API key. Set GOOGLE_MAPS_API_KEY environment variable or pass -ApiKey parameter."
 }
 
-# ── Import wspólnych funkcji ──────────────────────────────────────────────────
+# ── Import shared functions ────────────────────────────────────────────────────
 . "$PSScriptRoot\RouteMapFunctions.ps1"
 
 # ── Tworzenie folderu wynikowego ──────────────────────────────────────────────
@@ -78,18 +78,18 @@ if (-not (Test-Path -Path $OutputFolder)) {
 function ConvertTo-SafeFileName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name)
-    # Zamień znaki niedozwolone w nazwach plików/folderów Windows na '-'
+    # Replace forbidden Windows path characters with '-'
     $InvalidChars = [System.IO.Path]::GetInvalidFileNameChars()
     $Safe = $Name
     foreach ($Char in $InvalidChars) {
         $Safe = $Safe.Replace([string]$Char, '-')
     }
-    # Dodatkowo zamień spacje na '-' dla czytelności
+    # Replace spaces with '-' for readability
     $Safe = $Safe.Trim()
     return $Safe
 }
 
-# ── Funkcja: czy adres pracy jest prawidłowy (nie pusty, nie "Nie dotyczy") ───
+# ── Helper: verify if work address is valid (not empty, not "Not applicable") ──
 function Test-PracaAddress {
     [CmdletBinding()]
     param([Parameter()][string]$Praca)
@@ -99,7 +99,7 @@ function Test-PracaAddress {
     return $true
 }
 
-# ── Funkcja: oblicz trasę i wygeneruj mapę PNG ───────────────────────────────
+# ── Helper: calculate route and render PNG map ─────────────────────────────────
 function Invoke-RouteAndMap {
     [CmdletBinding()]
     param(
@@ -150,10 +150,10 @@ function Invoke-RouteAndMap {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# GŁÓWNA LOGIKA
+# MAIN EXECUTION LOGIC
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Wybór pliku wejściowego ───────────────────────────────────────────────────
+# ── Select Input File ──────────────────────────────────────────────────────────
 if ([string]::IsNullOrWhiteSpace($InputExcel)) {
     Write-Host "Otwieranie dialogu wyboru pliku Excel..." -ForegroundColor Cyan
     $InputExcel = Select-InputExcel
@@ -225,12 +225,12 @@ $ColMap.GetEnumerator() | Sort-Object Name | ForEach-Object {
     Write-Host "  $($_.Name) -> $Status" -ForegroundColor $(if ($_.Value) { 'Green' } else { 'Yellow' })
 }
 
-# ── Główna pętla przetwarzania ────────────────────────────────────────────────
+# ── Main Processing Loop ─────────────────────────────────────────────────────
 $WszystkieWyniki = [System.Collections.Generic.List[PSCustomObject]]::new()
 $RowIndex = 0
 $TotalRows = @($Dane).Count
 
-# Cache geokodowania — adresy mogą się powtarzać między umowami
+# Geocoding cache — addresses frequently repeat across contracts
 $GeoCache = @{}
 
 foreach ($Row in $Dane) {
@@ -319,7 +319,7 @@ foreach ($Row in $Dane) {
         $HasError = $true
     }
 
-    # Szkoła
+    # School
     if ($GeoCache.ContainsKey($AdresSzkoly)) {
         $GeoSzkola = $GeoCache[$AdresSzkoly]
     }
@@ -346,7 +346,7 @@ foreach ($Row in $Dane) {
         }
         if (-not $GeoPraca -or $GeoPraca.Status -ne 'OK') {
             Write-Warning "  Błąd geokodowania Pracy: $($GeoPraca.Status)"
-            # Praca nie jest krytyczna — kontynuujemy bez tras z pracą
+            # Work is optional — continue without work routes if geocoding fails
             $MaPrace = $false
         }
     }
@@ -435,7 +435,7 @@ foreach ($Row in $Dane) {
         $KmPracaDom = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
-        # Trasa 5: Szkoła → Praca
+        # Route 5: School -> Work
         $PngName = "${SafeName}_Szkoła_Praca.png"
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoSzkola -GeoEnd $GeoPraca `
@@ -445,7 +445,7 @@ foreach ($Row in $Dane) {
         $KmSzkolaPraca = $Result.OdlegloscKm
         Start-Sleep -Milliseconds 250
 
-        # Trasa 6: Praca → Szkoła
+        # Route 6: Work -> School
         $PngName = "${SafeName}_Praca_Szkoła.png"
         $PngPath = Join-Path -Path $UmowaFolder -ChildPath $PngName
         $Result = Invoke-RouteAndMap -GeoStart $GeoPraca -GeoEnd $GeoSzkola `
@@ -510,7 +510,7 @@ if ($WszystkieWyniki.Count -gt 0) {
         -TableName 'WszystkieUmowy' -AutoSize -AutoFilter -ClearSheet `
         -NoNumberConversion 'Numer umowy' -FreezeTopRow
 
-    # Dodaj dane wejściowe jako drugi arkusz
+    # Add input data as second worksheet
     $Dane | Export-Excel -Path $ZbiorczyExcelPath -WorksheetName 'Dane wejściowe' `
         -TableName 'DaneWejsciowe' -AutoSize -AutoFilter -ClearSheet `
         -NoNumberConversion *
