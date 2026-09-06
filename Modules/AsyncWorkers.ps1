@@ -370,7 +370,8 @@ $script:BatchCalcAsync = {
             }
 
             # Render map
-            $cleanName = ($routeName -replace '[\\/:*?"<>|]', '_').Trim()
+            $cleanName = ($routeName -replace '[\\/:*?"<>|]', '_').Trim().Trim('.') -replace '\s+', ' '
+            if ([string]::IsNullOrWhiteSpace($cleanName)) { $cleanName = "route_$($i + 1)" }
             $mapFileName = "${ts}_route_$($i + 1)_${cleanName}.png"
             $mapPath = Join-Path $outDir $mapFileName
 

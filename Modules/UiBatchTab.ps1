@@ -43,7 +43,7 @@ function Load-BatchFilePreviewInternal([string]$Path) {
 
         if ($data.Mode -eq 'SequentialStops') {
             if ($lblBatchFileInfo) {
-                $lblBatchFileInfo.Text = "Format: $($data.Format) | Mode: Sequential Stops (1 Multi-point Route, $($data.TotalCount) Stops) | Total: $($data.TotalCount) stops"
+                $lblBatchFileInfo.Text = "Format: $($data.Format) | Mode: Sequential Stops ($($data.Routes.Count) Routes, $($data.TotalCount) Stops) | Total: $($data.TotalCount) stops"
                 $lblBatchFileInfo.Foreground = [System.Windows.Media.Brushes]::LightGreen
             }
 
@@ -51,33 +51,47 @@ function Load-BatchFilePreviewInternal([string]$Path) {
                 $colStep = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colStep.Header = "#"
                 $colStep.Binding = [System.Windows.Data.Binding]::new("Step")
-                $colStep.Width = [System.Windows.Controls.DataGridLength]::new(55)
+                $colStep.Width = [System.Windows.Controls.DataGridLength]::new(50)
+                $colStep.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colStep)
+
+                $colRouteName = [System.Windows.Controls.DataGridTextColumn]::new()
+                $colRouteName.Header = (Get-LocText 'BatchColName' 'Route Name')
+                $bindRouteName = [System.Windows.Data.Binding]::new("RouteName")
+                $bindRouteName.Mode = [System.Windows.Data.BindingMode]::TwoWay
+                $bindRouteName.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+                $colRouteName.Binding = $bindRouteName
+                $colRouteName.Width = [System.Windows.Controls.DataGridLength]::new(200)
+                $colRouteName.IsReadOnly = $false
+                $dgBatchInput.Columns.Add($colRouteName)
 
                 $colRole = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colRole.Header = "Role / Point Type"
                 $colRole.Binding = [System.Windows.Data.Binding]::new("Role")
-                $colRole.Width = [System.Windows.Controls.DataGridLength]::new(180)
+                $colRole.Width = [System.Windows.Controls.DataGridLength]::new(160)
+                $colRole.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colRole)
 
                 $colAddr = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colAddr.Header = "Address / Location"
                 $colAddr.Binding = [System.Windows.Data.Binding]::new("Address")
-                $colAddr.Width = [System.Windows.Controls.DataGridLength]::new(340)
+                $colAddr.Width = [System.Windows.Controls.DataGridLength]::new(320)
+                $colAddr.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colAddr)
 
                 $colRaw = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colRaw.Header = "Source Record Data"
                 $colRaw.Binding = [System.Windows.Data.Binding]::new("RawSummary")
                 $colRaw.Width = [System.Windows.Controls.DataGridLength]::new(1, [System.Windows.Controls.DataGridLengthUnitType]::Star)
+                $colRaw.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colRaw)
 
                 $previewItems = [System.Collections.Generic.List[PSCustomObject]]::new()
                 $stopsCount = $data.Stops.Count
                 for ($i = 0; $i -lt $stopsCount; $i++) {
                     $st = $data.Stops[$i]
-                    $role = if ($i -eq 0) { "🟢 Origin (Start)" }
-                    elseif ($i -eq ($stopsCount - 1)) { "🔴 Destination (End)" }
+                    $role = if ($st.Sequence -eq '1' -or $i -eq 0) { "🟢 Origin (Start)" }
+                    elseif ($i -eq ($stopsCount - 1) -or ($i + 1 -lt $stopsCount -and $data.Stops[$i + 1].Sequence -eq '1')) { "🔴 Destination (End)" }
                     else { "🟡 Waypoint $i" }
 
                     $rawProps = @()
@@ -88,6 +102,8 @@ function Load-BatchFilePreviewInternal([string]$Path) {
                     }
                     $previewItems.Add([PSCustomObject]@{
                         Step       = ($i + 1)
+                        RouteId    = [string]$st.RouteId
+                        RouteName  = [string]$st.RouteName
                         Role       = $role
                         Address    = [string]$st.Address
                         RawSummary = ($rawProps -join '; ')
@@ -108,42 +124,52 @@ function Load-BatchFilePreviewInternal([string]$Path) {
                 $colId.Header = "ID"
                 $colId.Binding = [System.Windows.Data.Binding]::new("Id")
                 $colId.Width = [System.Windows.Controls.DataGridLength]::new(50)
+                $colId.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colId)
 
                 $colName = [System.Windows.Controls.DataGridTextColumn]::new()
-                $colName.Header = "Route Name"
-                $colName.Binding = [System.Windows.Data.Binding]::new("Name")
+                $colName.Header = (Get-LocText 'BatchColName' 'Route Name')
+                $bindName = [System.Windows.Data.Binding]::new("Name")
+                $bindName.Mode = [System.Windows.Data.BindingMode]::TwoWay
+                $bindName.UpdateSourceTrigger = [System.Windows.Data.UpdateSourceTrigger]::PropertyChanged
+                $colName.Binding = $bindName
                 $colName.Width = [System.Windows.Controls.DataGridLength]::new(180)
+                $colName.IsReadOnly = $false
                 $dgBatchInput.Columns.Add($colName)
 
                 $colStart = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colStart.Header = "Origin (Start)"
                 $colStart.Binding = [System.Windows.Data.Binding]::new("Start")
                 $colStart.Width = [System.Windows.Controls.DataGridLength]::new(200)
+                $colStart.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colStart)
 
                 $colEnd = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colEnd.Header = "Destination (End)"
                 $colEnd.Binding = [System.Windows.Data.Binding]::new("End")
                 $colEnd.Width = [System.Windows.Controls.DataGridLength]::new(200)
+                $colEnd.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colEnd)
 
                 $colWpCount = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colWpCount.Header = "Waypoints"
                 $colWpCount.Binding = [System.Windows.Data.Binding]::new("WaypointCount")
                 $colWpCount.Width = [System.Windows.Controls.DataGridLength]::new(80)
+                $colWpCount.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colWpCount)
 
                 $colWpText = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colWpText.Header = "Intermediate Stops"
                 $colWpText.Binding = [System.Windows.Data.Binding]::new("WaypointsText")
                 $colWpText.Width = [System.Windows.Controls.DataGridLength]::new(250)
+                $colWpText.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colWpText)
 
                 $colType = [System.Windows.Controls.DataGridTextColumn]::new()
                 $colType.Header = "Route Type"
                 $colType.Binding = [System.Windows.Data.Binding]::new("RouteType")
                 $colType.Width = [System.Windows.Controls.DataGridLength]::new(100)
+                $colType.IsReadOnly = $true
                 $dgBatchInput.Columns.Add($colType)
 
                 $previewItems = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -176,6 +202,59 @@ function Load-BatchFilePreviewInternal([string]$Path) {
     }
 }
 Set-Item -Path "function:global:Load-BatchFilePreviewInternal" -Value (Get-Item "function:Load-BatchFilePreviewInternal").ScriptBlock -ErrorAction SilentlyContinue
+
+function Sync-BatchPreviewToRoutes {
+    if (-not $script:LoadedBatchData -or -not $script:Controls -or -not $script:Controls.dgBatchInput) { return }
+    $dg = $script:Controls.dgBatchInput
+
+    try {
+        $dg.CommitEdit([System.Windows.Controls.DataGridEditingUnit]::Row, $true)
+    }
+    catch { }
+
+    $items = @($dg.ItemsSource)
+    if ($items.Count -eq 0) { return }
+
+    if ($script:LoadedBatchData.Mode -eq 'SequentialStops') {
+        # "for multipoints in many rows its enough that the name is in first row"
+        foreach ($route in @($script:LoadedBatchData.Routes)) {
+            $matchingStops = @($items | Where-Object { $_.RouteId -eq $route.Id })
+            if ($matchingStops.Count -eq 0 -and $script:LoadedBatchData.Routes.Count -eq 1) {
+                $matchingStops = $items
+            }
+
+            # Check first row first
+            $resolvedName = ''
+            if ($matchingStops.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($matchingStops[0].RouteName)) {
+                $resolvedName = $matchingStops[0].RouteName.Trim()
+            }
+            # Fallback to any other row in the group if first row was blank
+            if ([string]::IsNullOrWhiteSpace($resolvedName)) {
+                foreach ($st in $matchingStops) {
+                    if (-not [string]::IsNullOrWhiteSpace($st.RouteName)) {
+                        $resolvedName = $st.RouteName.Trim()
+                        break
+                    }
+                }
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($resolvedName)) {
+                $route.Name = $resolvedName
+            }
+        }
+    }
+    else {
+        # RouteList mode
+        $routes = @($script:LoadedBatchData.Routes)
+        for ($i = 0; $i -lt [math]::Min($routes.Count, $items.Count); $i++) {
+            $gridItem = $items[$i]
+            if ($gridItem -and -not [string]::IsNullOrWhiteSpace($gridItem.Name)) {
+                $routes[$i].Name = $gridItem.Name.Trim()
+            }
+        }
+    }
+}
+Set-Item -Path "function:global:Sync-BatchPreviewToRoutes" -Value (Get-Item "function:Sync-BatchPreviewToRoutes").ScriptBlock -ErrorAction SilentlyContinue
 
 function Register-UiBatchTabEvents {
     [CmdletBinding()]
@@ -283,8 +362,18 @@ function Register-UiBatchTabEvents {
         }
     })
 
+    if ($dgBatchInput) {
+        $dgBatchInput.Add_CellEditEnding({
+            Sync-BatchPreviewToRoutes
+        })
+        $dgBatchInput.Add_RowEditEnding({
+            Sync-BatchPreviewToRoutes
+        })
+    }
+
     # Feature 3.J: Pre-Batch Geocode Validation
     $btnValidateBatchGeocoding.Add_Click({
+        Sync-BatchPreviewToRoutes
         $apiKey = if (Get-Command Get-CurrentApiKey -ErrorAction SilentlyContinue) { Get-CurrentApiKey } else { $script:AppConfig.ApiKey }
         if ([string]::IsNullOrWhiteSpace($apiKey)) {
             [System.Windows.MessageBox]::Show((Get-LocText 'MsgMissingApiKeyPrompt' 'Google Maps API Key is required.'), (Get-LocText 'MsgMissingApiKeyTitle' 'Missing API Key'), 'OK', 'Warning')
@@ -461,6 +550,7 @@ function Register-UiBatchTabEvents {
 
     # Start Batch Processing
     $btnStartBatch.Add_Click({
+        Sync-BatchPreviewToRoutes
         $apiKey = if (Get-Command Get-CurrentApiKey -ErrorAction SilentlyContinue) { Get-CurrentApiKey } else { $script:AppConfig.ApiKey }
         if ([string]::IsNullOrWhiteSpace($apiKey)) {
             [System.Windows.MessageBox]::Show((Get-LocText 'MsgMissingApiKeyPrompt'), (Get-LocText 'MsgMissingApiKeyTitle'), 'OK', 'Warning')

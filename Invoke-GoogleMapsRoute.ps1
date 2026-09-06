@@ -505,7 +505,8 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
 
             $MapPath = $null
             if ($GenerateMap -and $Trasa.EncodedPolyline) {
-                $SafeName = ($RouteName -replace '[\\/:*?"<>|]', '_').Trim()
+                $SafeName = ($RouteName -replace '[\\/:*?"<>|]', '_').Trim().Trim('.') -replace '\s+', ' '
+                if ([string]::IsNullOrWhiteSpace($SafeName)) { $SafeName = "trasa_${CurrentIdx}" }
                 $MapFileName = "${Timestamp}_trasa_${CurrentIdx}_${SafeName}.png"
                 $MapPath = Join-Path $OutputFolder $MapFileName
 
@@ -521,7 +522,7 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     -Width $MapWidth -Height $MapHeight `
                     -AddressTextA $GeoStart.FormattedAddress -AddressTextB $GeoEnd.FormattedAddress `
                     -DistanceText "$($Trasa.OdlegloscKm) km" -DurationText "$($Trasa.CzasMin) min" `
-                    -HeaderLeftText $RouteName -HeaderRightText "Typ: $RowRouteType"
+                    -HeaderLeftText $RouteName -RouteName $RouteName -HeaderRightText "Typ: $RowRouteType"
             }
 
             $ResultsList.Add([PSCustomObject]@{

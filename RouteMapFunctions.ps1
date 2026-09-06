@@ -1215,47 +1215,140 @@ function Import-RouteDataFile {
     # Analiza kolumn pierwszego wiersza
     $PropNames = @($RawRows[0].PSObject.Properties.Name)
 
-    # 1. Check if file represents a sequential waypoint sequence for a single route (SequentialStops)
-    # np. kolumny: LP / Kolejnosc + Adres / Lokalizacja
+    # Column matching patterns
+    $ColRouteNamePatterns = @(
+        '(?i)^(nazwa[\s_]*trasy|route[\s_]*name|routename|nazwatrasy)$',
+        '(?i)(nazwa[\s_]*trasy|route[\s_]*name)',
+        '(?i)^(name|nazwa)$',
+        '(?i)^(umowa|contract|opis|description|tytul)$',
+        '(?i)numer.*umowy',
+        '(?i)^(id|nr)$'
+    )
+
+    # 1. Check if file represents a sequential waypoint sequence for single or multiple routes (SequentialStops)
+    # e.g., columns: LP / Kolejnosc + Adres / Lokalizacja
     $ColSeq = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @('^(lp|l\.p\.|kolejnosc|stop|sequence|order|nr)$')
     $ColAddrSeq = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @('^(adres|address|lokalizacja|punkt|miejsce)$', 'lokalizacja.*(odbioru|dowozu)', 'adres.*(odbioru|dowozu)')
     $ColCitySeq = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @('^(miejscowosc|miasto|city|town)$')
+    $ColRouteNameSeq = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns $ColRouteNamePatterns
 
     $IsSequentialStops = ($ColSeq -and ($ColAddrSeq -or $ColCitySeq) -and -not (Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @('^(start|origin|adres.*a)$')))
 
     if ($IsSequentialStops) {
-        $OrderedStops = @($RawRows | Sort-Object { [int]($_.$ColSeq) })
-        $StopList = [System.Collections.Generic.List[PSCustomObject]]::new()
-        foreach ($st in $OrderedStops) {
-            $addr = if ($ColAddrSeq) { [string]$st.$ColAddrSeq } else { '' }
-            $city = if ($ColCitySeq) { [string]$st.$ColCitySeq } else { '' }
-            $fullAddr = if ($addr -and $city) { "$addr, $city" } elseif ($addr) { $addr } else { $city }
-            $StopList.Add([PSCustomObject]@{
-                Sequence = [string]$st.$ColSeq
-                Address  = $fullAddr.Trim()
-                Raw      = $st
-            })
-        }
+        # Group sequential stops into routes (supports single route or multiple grouped routes)
+        $routeGroups = [System.Collections.Generic.List[System.Collections.Generic.List[object]]]::new()
+        $currGroup = [System.Collections.Generic.List[object]]::new()
+        $activeGrpName = ''
 
-        # Generujemy z sekwencji pojedynczą trasę z punktami pośrednimi
-        $RouteObj = $null
-        if ($StopList.Count -ge 2) {
-            $StartPoint = $StopList[0].Address
-            $EndPoint = $StopList[$StopList.Count - 1].Address
-            $Waypoints = if ($StopList.Count -gt 2) { @($StopList[1..($StopList.Count - 2)] | ForEach-Object { $_.Address }) } else { @() }
-            $RouteObj = [PSCustomObject]@{
-                Id          = '1'
-                Name        = "Multi-point Route ($($StopList.Count) stops)"
-                Start       = $StartPoint
-                End         = $EndPoint
-                Waypoints   = $Waypoints
-                RouteType   = 'Fastest'
-                OriginalRow = $OrderedStops
+        foreach ($row in $RawRows) {
+            $rSeq = if ($ColSeq) { [string]$row.$ColSeq } else { '' }
+            $rName = if ($ColRouteNameSeq) { [string]$row.$ColRouteNameSeq } else { '' }
+            $hasRowName = -not [string]::IsNullOrWhiteSpace($rName)
+
+            $isNewRoute = $false
+            if ($currGroup.Count -gt 0) {
+                # New route if route name explicitly changes to another non-empty name
+                if ($hasRowName -and -not [string]::IsNullOrWhiteSpace($activeGrpName) -and ($rName.Trim() -ne $activeGrpName)) {
+                    $isNewRoute = $true
+                }
+                # Or if sequence index resets back to 1 after accumulating at least 2 stops
+                elseif ($ColSeq -and ($rSeq.Trim() -eq '1') -and ($currGroup.Count -ge 2)) {
+                    $isNewRoute = $true
+                }
+            }
+
+            if ($isNewRoute) {
+                $routeGroups.Add($currGroup)
+                $currGroup = [System.Collections.Generic.List[object]]::new()
+                $activeGrpName = ''
+            }
+
+            $currGroup.Add($row)
+            if ($hasRowName -and [string]::IsNullOrWhiteSpace($activeGrpName)) {
+                $activeGrpName = $rName.Trim()
             }
         }
+        if ($currGroup.Count -gt 0) {
+            $routeGroups.Add($currGroup)
+        }
 
+        $StopList = [System.Collections.Generic.List[PSCustomObject]]::new()
         $RoutesList = [System.Collections.Generic.List[PSCustomObject]]::new()
-        if ($RouteObj) { $RoutesList.Add($RouteObj) }
+        $grpIdx = 1
+
+        foreach ($grpRows in $routeGroups) {
+            $orderedRows = @($grpRows)
+            # Try sorting by sequence if numeric
+            $canSort = $true
+            if ($ColSeq) {
+                foreach ($r in $orderedRows) {
+                    $val = [string]$r.$ColSeq
+                    if ($val -notmatch '^\d+$') { $canSort = $false; break }
+                }
+            } else { $canSort = $false }
+            if ($canSort) {
+                $orderedRows = @($orderedRows | Sort-Object { [int]($_.$ColSeq) })
+            }
+
+            # Find route name for this group: first non-empty name in group (first row is checked first)
+            $grpRouteName = ''
+            if ($ColRouteNameSeq) {
+                foreach ($r in $orderedRows) {
+                    $cand = [string]$r.$ColRouteNameSeq
+                    if (-not [string]::IsNullOrWhiteSpace($cand)) {
+                        $grpRouteName = $cand.Trim()
+                        break
+                    }
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($grpRouteName)) {
+                $grpRouteName = if ($routeGroups.Count -gt 1) { "Trasa $grpIdx" } else { "Multi-point Route ($($orderedRows.Count) stops)" }
+            }
+
+            $grpStops = [System.Collections.Generic.List[PSCustomObject]]::new()
+            for ($s = 0; $s -lt $orderedRows.Count; $s++) {
+                $st = $orderedRows[$s]
+                $addr = if ($ColAddrSeq) { [string]$st.$ColAddrSeq } else { '' }
+                $city = if ($ColCitySeq) { [string]$st.$ColCitySeq } else { '' }
+                $fullAddr = if ($addr -and $city) { "$addr, $city" } elseif ($addr) { $addr } else { $city }
+
+                # Route name visible in first row of the multipoint route
+                $stopRouteName = if ($s -eq 0) {
+                    $grpRouteName
+                } elseif ($ColRouteNameSeq -and -not [string]::IsNullOrWhiteSpace($st.$ColRouteNameSeq)) {
+                    ([string]$st.$ColRouteNameSeq).Trim()
+                } else {
+                    ''
+                }
+
+                $stopObj = [PSCustomObject]@{
+                    Sequence  = if ($ColSeq) { [string]$st.$ColSeq } else { [string]($s + 1) }
+                    RouteId   = [string]$grpIdx
+                    RouteName = $stopRouteName
+                    Address   = $fullAddr.Trim()
+                    Raw       = $st
+                }
+                $grpStops.Add($stopObj)
+                $StopList.Add($stopObj)
+            }
+
+            if ($grpStops.Count -ge 2) {
+                $StartPoint = $grpStops[0].Address
+                $EndPoint = $grpStops[$grpStops.Count - 1].Address
+                $Waypoints = if ($grpStops.Count -gt 2) { @($grpStops[1..($grpStops.Count - 2)] | ForEach-Object { $_.Address }) } else { @() }
+                $RouteObj = [PSCustomObject]@{
+                    Id          = [string]$grpIdx
+                    Name        = $grpRouteName
+                    Start       = $StartPoint
+                    End         = $EndPoint
+                    Waypoints   = $Waypoints
+                    RouteType   = 'Fastest'
+                    OriginalRow = $orderedRows
+                }
+                $RoutesList.Add($RouteObj)
+            }
+            $grpIdx++
+        }
 
         return [PSCustomObject]@{
             Mode       = 'SequentialStops'
@@ -1283,10 +1376,7 @@ function Import-RouteDataFile {
         '(?i)^(waypoints|waypoint|posredn.*|punkty.*posredn.*|przystank.*|via|stops|praca)$',
         '(?i)posrednie'
     )
-    $ColName = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @(
-        '(?i)^(name|nazwa|umowa|contract|id|nr|opis|description|tytul)$',
-        '(?i)numer.*umowy'
-    )
+    $ColName = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns $ColRouteNamePatterns
     $ColRouteType = Find-MatchingPropertyName -AvailableProperties $PropNames -Patterns @(
         '(?i)^(routetype|typ|typtrasy|tryb|mode|optimization)$'
     )
@@ -1301,7 +1391,11 @@ function Import-RouteDataFile {
             continue
         }
 
-        $nameVal = if ($ColName) { [string]$row.$ColName } else { "Trasa $idx" }
+        $nameVal = if ($ColName -and -not [string]::IsNullOrWhiteSpace($row.$ColName)) {
+            ([string]$row.$ColName).Trim()
+        } else {
+            "Trasa $idx"
+        }
         $typeVal = if ($ColRouteType) { [string]$row.$ColRouteType } else { $null }
 
         # Normalizacja RouteType

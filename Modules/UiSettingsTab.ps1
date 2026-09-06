@@ -397,6 +397,17 @@ function Apply-AppLanguage {
     if ($Controls.btnCopyInvalidAddresses)   { $Controls.btnCopyInvalidAddresses.Content = (Get-LocText 'BatchBtnCopyInvalid' '📋 Copy Invalid Addresses') }
 
     # Batch DataGrid Columns
+    if ($Controls.dgBatchInput -and $Controls.dgBatchInput.Columns.Count -ge 2) {
+        $Controls.dgBatchInput.Columns[1].Header = (Get-LocText 'BatchColName')
+        if ($Controls.dgBatchInput.Columns.Count -ge 7) {
+            $Controls.dgBatchInput.Columns[0].Header = (Get-LocText 'BatchColId')
+            $Controls.dgBatchInput.Columns[2].Header = (Get-LocText 'BatchColOrigin')
+            $Controls.dgBatchInput.Columns[3].Header = (Get-LocText 'BatchColDestination')
+            $Controls.dgBatchInput.Columns[4].Header = (Get-LocText 'BatchColWaypoints')
+            $Controls.dgBatchInput.Columns[6].Header = (Get-LocText 'BatchColType')
+        }
+    }
+
     if ($Controls.dgBatchResults -and $Controls.dgBatchResults.Columns.Count -ge 10) {
         $Controls.dgBatchResults.Columns[0].Header = (Get-LocText 'BatchColId')
         $Controls.dgBatchResults.Columns[1].Header = (Get-LocText 'BatchColName')

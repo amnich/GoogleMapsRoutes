@@ -597,7 +597,7 @@ function Get-AppXaml {
                     <TabControl Name="tabBatchSub" Grid.Row="1" Background="Transparent" BorderThickness="0">
                         <TabItem Name="tabSubInput" Header="📋 Input Data Preview">
                             <Border Background="{DynamicResource BgDark}" BorderBrush="{DynamicResource BorderCard}" BorderThickness="1" CornerRadius="6" Margin="0,6,0,0">
-                                <DataGrid Name="dgBatchInput"/>
+                                <DataGrid Name="dgBatchInput" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" SelectionMode="Single" HeadersVisibility="Column"/>
                             </Border>
                         </TabItem>
 
