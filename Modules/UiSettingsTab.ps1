@@ -847,11 +847,13 @@ function Register-UiSettingsTabEvents {
         [System.Windows.MessageBox]::Show('Map overlay banners reset to recommended default layout.', 'Overlay Reset', 'OK', 'Information')
     })
 
-    # Header API Usage Badge Click -> Navigate to Settings
-    $btnApiUsageBadge.Add_Click({
-        if ($tabMain) { $tabMain.SelectedIndex = 2 }
-        elseif ($script:Controls -and $script:Controls.tabMain) { $script:Controls.tabMain.SelectedIndex = 2 }
-    })
+    # Header API Usage Badge Click -> Navigate to Settings (if present)
+    if ($btnApiUsageBadge) {
+        $btnApiUsageBadge.Add_Click({
+            if ($tabMain) { $tabMain.SelectedIndex = 2 }
+            elseif ($script:Controls -and $script:Controls.tabMain) { $script:Controls.tabMain.SelectedIndex = 2 }
+        })
+    }
 
     # Currency selection changed
     $cmbApiCurrency.Add_SelectionChanged({

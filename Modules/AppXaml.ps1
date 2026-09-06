@@ -342,9 +342,6 @@ function Get-AppXaml {
                     <TextBlock Name="txtHeaderSubtitle" Text="Multi-point driving routes: Fastest, Shortest, Eco-friendly | Import JSON, CSV, Excel" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="28,2,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Name="btnApiUsageBadge" Background="#1E293B" BorderBrush="#334155" BorderThickness="1" Padding="8,4" Margin="0,0,10,0" Cursor="Hand" ToolTip="Click to view API Usage &amp; Cost Details">
-                        <TextBlock Name="txtApiUsageBadge" Text="API: $0.00" Foreground="#38BDF8" FontSize="11" FontWeight="SemiBold"/>
-                    </Button>
                     <TextBlock Name="lblApiBadge" Text="API: Checking..." Foreground="#EF4444" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <ComboBox Name="cmbAppLanguage" Width="130" Height="30" Margin="0,0,10,0" VerticalAlignment="Center" ToolTip="Select Language"/>
                     <Button Name="btnQuickSettings" Content="⚙ API Settings" Background="{DynamicResource BtnSecondaryBg}" Foreground="{DynamicResource BtnSecondaryFg}" Padding="10,5" FontSize="12" Margin="0,0,10,0"/>

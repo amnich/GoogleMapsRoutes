@@ -96,7 +96,7 @@ $script:MainWindow = $window
 $Controls = [ordered]@{}
 
 $ctrlNames = @(
-    'btnAddWaypoint', 'btnApiUsageBadge', 'btnBatchExportGpx', 'btnBatchExportKml', 'btnBatchExportPdf',
+    'btnAddWaypoint', 'btnBatchExportGpx', 'btnBatchExportKml', 'btnBatchExportPdf',
     'btnBrowseBatchFile', 'btnBrowseSettingsOutputDir', 'btnCalculateManual', 'btnClearManualEnd', 'btnClearManualStart',
     'btnCopyInvalidAddresses', 'btnCopyUrl', 'btnExportCsv', 'btnExportExcel', 'btnExportJson',
     'btnManualExportGpx', 'btnManualExportKml', 'btnManualExportPdf', 'btnOpenGoogleMaps', 'btnOpenLangFile',
@@ -123,7 +123,7 @@ $ctrlNames = @(
     'lstWaypoints', 'pbBatchProgress', 'pnlEmission', 'pnlInteractiveMapHost', 'rbTypeEco', 'rbTypeFastest',
     'rbTypeShortest', 'rbViewInteractive', 'rbViewStatic', 'tabBatchSub', 'tabItemBatch', 'tabItemManual',
     'tabItemSettings', 'tabMain', 'tabSubInput', 'tabSubLog', 'tabSubPoints', 'tabSubResults', 'tabSubValidation',
-    'txtApiUsageBadge', 'txtBatchFilePath', 'txtBatchLog', 'txtHeaderSubtitle', 'txtHeaderTitle', 'txtManualEnd',
+    'txtBatchFilePath', 'txtBatchLog', 'txtHeaderSubtitle', 'txtHeaderTitle', 'txtManualEnd',
     'txtManualName', 'txtManualStart', 'txtNewWaypoint', 'txtSettingsApiKey', 'txtSettingsApiKeyVisible', 'txtSettingsOutputDir',
     'txtSettingsCartoApiKey', 'txtSettingsCartoApiKeyVisible', 'btnToggleCartoKeyVisibility',
     'lblSettingsCartoApiHeader', 'lblSettingsCartoApiDesc', 'lblSettingsCartoApiLabel'
