@@ -289,9 +289,10 @@ function Get-DefaultOverlayConfig {
             EndGeocoded   = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 2 }
             Distance      = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 3 }
             Duration      = [ordered]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 3 }
-            Waypoints     = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 4 }
-            StartRaw      = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 5 }
-            EndRaw        = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 6 }
+            Waypoints      = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 4 }
+            PointDistances = [ordered]@{ Enabled = $false; Panel = 'None';   Alignment = 'Left';   Order = 5 }
+            StartRaw       = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 6 }
+            EndRaw         = [ordered]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 7 }
         }
     }
 }

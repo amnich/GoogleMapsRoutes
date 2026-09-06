@@ -122,6 +122,15 @@ $script:ManualCalcAsync = {
         }
         & $wlog "Routes API route found: $($trasa.OdlegloscKm) km, $($trasa.CzasMin) min" "INFO"
 
+        if ($trasa.Legs -and $trasa.Legs.Count -gt 0) {
+            for ($w = 0; $w -lt $geoWp.Count; $w++) {
+                if ($w -lt $trasa.Legs.Count) {
+                    $geoWp[$w] | Add-Member -NotePropertyName 'LegDistanceKm' -NotePropertyValue $trasa.Legs[$w].DistanceKm -Force
+                    $geoWp[$w] | Add-Member -NotePropertyName 'LegDurationMin' -NotePropertyValue $trasa.Legs[$w].DurationMin -Force
+                }
+            }
+        }
+
         $gUrl = Get-GoogleMapsUrl -Origin "$($geoStart.Latitude),$($geoStart.Longitude)" `
             -Destination "$($geoEnd.Latitude),$($geoEnd.Longitude)" `
             -Waypoints $geoWp
@@ -157,6 +166,7 @@ $script:ManualCalcAsync = {
             -StartRaw $start -StartGeocoded $geoStart.FormattedAddress `
             -EndRaw $end -EndGeocoded $geoEnd.FormattedAddress `
             -WaypointsList $geoWp -RouteName $name -RouteType $headerRightText `
+            -Legs $trasa.Legs `
             -OverlayConfig $overlayConfigJson
         $staticCount++
 
@@ -259,6 +269,8 @@ $script:BatchCalcAsync = {
             $routePointsList.Add([PSCustomObject]@{
                 Order           = 1
                 PointType       = 'Start'
+                LegDistanceKm   = 0
+                LegDurationMin  = 0
                 OriginalAddress = $r.Start
                 GeocodedAddress = if ($geoStart) { $geoStart.FormattedAddress } else { $null }
                 GeocodeStatus   = $startStatus
@@ -287,6 +299,8 @@ $script:BatchCalcAsync = {
                         $routePointsList.Add([PSCustomObject]@{
                             Order           = $wpOrder
                             PointType       = "Waypoint $($wpOrder - 1)"
+                            LegDistanceKm   = $null
+                            LegDurationMin  = $null
                             OriginalAddress = $wpAddr
                             GeocodedAddress = if ($gw) { $gw.FormattedAddress } else { $null }
                             GeocodeStatus   = $gwStatus
@@ -305,6 +319,8 @@ $script:BatchCalcAsync = {
             $routePointsList.Add([PSCustomObject]@{
                 Order           = $wpOrder
                 PointType       = 'End'
+                LegDistanceKm   = $null
+                LegDurationMin  = $null
                 OriginalAddress = $r.End
                 GeocodedAddress = if ($geoEnd) { $geoEnd.FormattedAddress } else { $null }
                 GeocodeStatus   = $endStatus
@@ -369,6 +385,27 @@ $script:BatchCalcAsync = {
                 continue
             }
 
+            # Update route points and waypoints with leg distances/durations
+            if ($routeData.Legs -and $routeData.Legs.Count -gt 0) {
+                for ($p = 0; $p -lt $routePointsList.Count; $p++) {
+                    if ($p -eq 0) {
+                        $routePointsList[$p].LegDistanceKm = 0
+                        $routePointsList[$p].LegDurationMin = 0
+                    }
+                    elseif (($p - 1) -lt $routeData.Legs.Count) {
+                        $leg = $routeData.Legs[$p - 1]
+                        $routePointsList[$p].LegDistanceKm = $leg.DistanceKm
+                        $routePointsList[$p].LegDurationMin = $leg.DurationMin
+                    }
+                }
+                for ($w = 0; $w -lt $geoWp.Count; $w++) {
+                    if ($w -lt $routeData.Legs.Count) {
+                        $geoWp[$w] | Add-Member -NotePropertyName 'LegDistanceKm' -NotePropertyValue $routeData.Legs[$w].DistanceKm -Force
+                        $geoWp[$w] | Add-Member -NotePropertyName 'LegDurationMin' -NotePropertyValue $routeData.Legs[$w].DurationMin -Force
+                    }
+                }
+            }
+
             # Render map
             $cleanName = ($routeName -replace '[\\/:*?"<>|]', '_').Trim().Trim('.') -replace '\s+', ' '
             if ([string]::IsNullOrWhiteSpace($cleanName)) { $cleanName = "route_$($i + 1)" }
@@ -400,6 +437,7 @@ $script:BatchCalcAsync = {
                 -StartRaw $r.Start -StartGeocoded $geoStart.FormattedAddress `
                 -EndRaw $r.End -EndGeocoded $geoEnd.FormattedAddress `
                 -WaypointsList $geoWp -RouteName $routeName -RouteType $headerRightText `
+                -Legs $routeData.Legs `
                 -OverlayConfig $overlayConfigJson
             $staticCount++
 

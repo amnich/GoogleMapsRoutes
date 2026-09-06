@@ -691,6 +691,8 @@ function Register-UiBatchTabEvents {
                                     RouteName       = $item.Name
                                     PointOrder      = $pt.Order
                                     PointType       = $pt.PointType
+                                    LegDistanceKm   = if ($null -ne $pt.LegDistanceKm) { $pt.LegDistanceKm } else { 0 }
+                                    LegDurationMin  = if ($null -ne $pt.LegDurationMin) { $pt.LegDurationMin } else { 0 }
                                     OriginalAddress = $pt.OriginalAddress
                                     GeocodedAddress = $pt.GeocodedAddress
                                     GeocodeStatus   = $pt.GeocodeStatus

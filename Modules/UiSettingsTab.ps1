@@ -422,19 +422,21 @@ function Apply-AppLanguage {
     }
 
     # Points DataGrid Columns
-    if ($Controls.dgBatchPoints -and $Controls.dgBatchPoints.Columns.Count -ge 9) {
+    if ($Controls.dgBatchPoints -and $Controls.dgBatchPoints.Columns.Count -ge 11) {
         $Controls.dgBatchPoints.Columns[0].Header = (Get-LocText 'PointsColRouteId')
         $Controls.dgBatchPoints.Columns[1].Header = (Get-LocText 'PointsColRouteName')
         $Controls.dgBatchPoints.Columns[2].Header = (Get-LocText 'PointsColOrder')
         $Controls.dgBatchPoints.Columns[3].Header = (Get-LocText 'PointsColType')
-        $Controls.dgBatchPoints.Columns[4].Header = (Get-LocText 'PointsColOriginalAddress')
-        $Controls.dgBatchPoints.Columns[5].Header = (Get-LocText 'PointsColGeocodedAddress')
-        $Controls.dgBatchPoints.Columns[6].Header = (Get-LocText 'PointsColGeocodeStatus')
-        $Controls.dgBatchPoints.Columns[7].Header = (Get-LocText 'PointsColMatchType')
-        $Controls.dgBatchPoints.Columns[8].Header = (Get-LocText 'PointsColIsFallback')
-        if ($Controls.dgBatchPoints.Columns.Count -ge 11) {
-            $Controls.dgBatchPoints.Columns[9].Header = (Get-LocText 'PointsColLatitude')
-            $Controls.dgBatchPoints.Columns[10].Header = (Get-LocText 'PointsColLongitude')
+        $Controls.dgBatchPoints.Columns[4].Header = (Get-LocText 'PointsColLegDistance' 'Distance (km)')
+        $Controls.dgBatchPoints.Columns[5].Header = (Get-LocText 'PointsColLegDuration' 'Duration (min)')
+        $Controls.dgBatchPoints.Columns[6].Header = (Get-LocText 'PointsColOriginalAddress')
+        $Controls.dgBatchPoints.Columns[7].Header = (Get-LocText 'PointsColGeocodedAddress')
+        $Controls.dgBatchPoints.Columns[8].Header = (Get-LocText 'PointsColGeocodeStatus')
+        $Controls.dgBatchPoints.Columns[9].Header = (Get-LocText 'PointsColMatchType')
+        $Controls.dgBatchPoints.Columns[10].Header = (Get-LocText 'PointsColIsFallback')
+        if ($Controls.dgBatchPoints.Columns.Count -ge 13) {
+            $Controls.dgBatchPoints.Columns[11].Header = (Get-LocText 'PointsColLatitude')
+            $Controls.dgBatchPoints.Columns[12].Header = (Get-LocText 'PointsColLongitude')
         }
     }
 
@@ -553,7 +555,7 @@ function Register-UiSettingsTabEvents {
     }
     $script:OverlayPropKeys = @(
         'StartGeocoded', 'EndGeocoded', 'Distance', 'Duration', 'Timestamp',
-        'RouteName', 'RouteType', 'Waypoints', 'StartRaw', 'EndRaw'
+        'RouteName', 'RouteType', 'Waypoints', 'PointDistances', 'StartRaw', 'EndRaw'
     )
 
     $aliases = [ordered]@{

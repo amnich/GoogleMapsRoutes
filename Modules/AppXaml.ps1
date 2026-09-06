@@ -662,6 +662,8 @@ function Get-AppXaml {
                                         <DataGridTextColumn Header="Route Name" Binding="{Binding RouteName}" Width="150"/>
                                         <DataGridTextColumn Header="No." Binding="{Binding PointOrder}" Width="45"/>
                                         <DataGridTextColumn Header="Point Type" Binding="{Binding PointType}" Width="90"/>
+                                        <DataGridTextColumn Header="Distance (km)" Binding="{Binding LegDistanceKm}" Width="95"/>
+                                        <DataGridTextColumn Header="Duration (min)" Binding="{Binding LegDurationMin}" Width="95"/>
                                         <DataGridTextColumn Header="Original Address" Binding="{Binding OriginalAddress}" Width="220"/>
                                         <DataGridTextColumn Header="Geocoded Address" Binding="{Binding GeocodedAddress}" Width="240"/>
                                         <DataGridTextColumn Header="Geocode Status" Binding="{Binding GeocodeStatus}" Width="170"/>
@@ -877,6 +879,7 @@ function Get-AppXaml {
                                 <Border Background="{DynamicResource BgDark}" BorderBrush="{DynamicResource BorderCard}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,10">
                                     <Grid Name="gridOverlayConfig">
                                         <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
@@ -1148,6 +1151,31 @@ function Get-AppXaml {
                                             <ComboBoxItem Content="3" Tag="3"/>
                                             <ComboBoxItem Content="4" Tag="4"/>
                                             <ComboBoxItem Content="5" Tag="5"/>
+                                            <ComboBoxItem Content="6" Tag="6"/>
+                                            <ComboBoxItem Content="7" Tag="7"/>
+                                            <ComboBoxItem Content="8" Tag="8"/>
+                                            <ComboBoxItem Content="9" Tag="9"/>
+                                        </ComboBox>
+
+                                        <!-- Row 11: PointDistances -->
+                                        <TextBlock Name="lblProp_PointDistances" Grid.Row="11" Grid.Column="0" Text="Point Distances (in addresses)" Foreground="{DynamicResource TextPrimary}" FontSize="12" VerticalAlignment="Center" Margin="4,4" ToolTip="Appends distance in parentheses (+X km) to waypoints and destination address"/>
+                                        <CheckBox Name="chkProp_PointDistances" Grid.Row="11" Grid.Column="1" IsChecked="False" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Appends distance in parentheses (+X km) to waypoints and destination address"/>
+                                        <ComboBox Name="cmbPanel_PointDistances" Grid.Row="11" Grid.Column="2" Margin="3,2">
+                                            <ComboBoxItem Content="None" Tag="None" IsSelected="True"/>
+                                            <ComboBoxItem Content="Bottom" Tag="Bottom"/>
+                                            <ComboBoxItem Content="Top" Tag="Top"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbAlign_PointDistances" Grid.Row="11" Grid.Column="3" Margin="3,2">
+                                            <ComboBoxItem Content="Left" Tag="Left" IsSelected="True"/>
+                                            <ComboBoxItem Content="Center" Tag="Center"/>
+                                            <ComboBoxItem Content="Right" Tag="Right"/>
+                                        </ComboBox>
+                                        <ComboBox Name="cmbOrder_PointDistances" Grid.Row="11" Grid.Column="4" Margin="3,2">
+                                            <ComboBoxItem Content="1" Tag="1"/>
+                                            <ComboBoxItem Content="2" Tag="2"/>
+                                            <ComboBoxItem Content="3" Tag="3"/>
+                                            <ComboBoxItem Content="4" Tag="4"/>
+                                            <ComboBoxItem Content="5" Tag="5" IsSelected="True"/>
                                             <ComboBoxItem Content="6" Tag="6"/>
                                             <ComboBoxItem Content="7" Tag="7"/>
                                             <ComboBoxItem Content="8" Tag="8"/>

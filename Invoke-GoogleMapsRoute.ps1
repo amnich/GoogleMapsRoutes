@@ -267,7 +267,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Manual') {
             -Width $MapWidth -Height $MapHeight `
             -AddressTextA $GeoStart.FormattedAddress -AddressTextB $GeoEnd.FormattedAddress `
             -DistanceText "$($Trasa.OdlegloscKm) km" -DurationText "$($Trasa.CzasMin) min" `
-            -HeaderLeftText $Name -HeaderRightText "Typ: $ActualRouteType"
+            -HeaderLeftText $Name -HeaderRightText "Typ: $ActualRouteType" `
+            -Legs $Trasa.Legs
 
         if ($MapSaved) {
             Write-Host "  Mapa PNG : $MapPath" -ForegroundColor Cyan
@@ -347,6 +348,8 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
             $RoutePoints.Add([PSCustomObject]@{
                 Order           = 1
                 PointType       = 'Start'
+                LegDistanceKm   = 0
+                LegDurationMin  = 0
                 OriginalAddress = $r.Start
                 GeocodedAddress = if ($GeoStart) { $GeoStart.FormattedAddress } else { $null }
                 GeocodeStatus   = $StartStatus
@@ -390,6 +393,8 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                 $RoutePoints.Add([PSCustomObject]@{
                     Order           = 2
                     PointType       = 'End'
+                    LegDistanceKm   = $null
+                    LegDurationMin  = $null
                     OriginalAddress = $r.End
                     GeocodedAddress = if ($GeoEnd) { $GeoEnd.FormattedAddress } else { $null }
                     GeocodeStatus   = $EndStatus
@@ -433,6 +438,8 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     $RoutePoints.Add([PSCustomObject]@{
                         Order           = ($WpIdx + 1)
                         PointType       = "Waypoint $WpIdx"
+                        LegDistanceKm   = $null
+                        LegDurationMin  = $null
                         OriginalAddress = $wp
                         GeocodedAddress = if ($g) { $g.FormattedAddress } else { $null }
                         GeocodeStatus   = $wpStatus
@@ -458,6 +465,8 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
             $RoutePoints.Add([PSCustomObject]@{
                 Order           = ($RoutePoints.Count + 1)
                 PointType       = 'End'
+                LegDistanceKm   = $null
+                LegDurationMin  = $null
                 OriginalAddress = $r.End
                 GeocodedAddress = if ($GeoEnd) { $GeoEnd.FormattedAddress } else { $null }
                 GeocodeStatus   = $EndStatus
@@ -499,6 +508,26 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
 
             Write-Host "  OK: $($Trasa.OdlegloscKm) km, $($Trasa.CzasMin) min" -ForegroundColor Green
 
+            if ($Trasa.Legs -and $Trasa.Legs.Count -gt 0) {
+                for ($p = 0; $p -lt $RoutePoints.Count; $p++) {
+                    if ($p -eq 0) {
+                        $RoutePoints[$p].LegDistanceKm = 0
+                        $RoutePoints[$p].LegDurationMin = 0
+                    }
+                    elseif (($p - 1) -lt $Trasa.Legs.Count) {
+                        $leg = $Trasa.Legs[$p - 1]
+                        $RoutePoints[$p].LegDistanceKm = $leg.DistanceKm
+                        $RoutePoints[$p].LegDurationMin = $leg.DurationMin
+                    }
+                }
+                for ($w = 0; $w -lt $GeocodedWaypoints.Count; $w++) {
+                    if ($w -lt $Trasa.Legs.Count) {
+                        $GeocodedWaypoints[$w] | Add-Member -NotePropertyName 'LegDistanceKm' -NotePropertyValue $Trasa.Legs[$w].DistanceKm -Force
+                        $GeocodedWaypoints[$w] | Add-Member -NotePropertyName 'LegDurationMin' -NotePropertyValue $Trasa.Legs[$w].DurationMin -Force
+                    }
+                }
+            }
+
             $GoogleMapsUrl = Get-GoogleMapsUrl -Origin "$($GeoStart.Latitude),$($GeoStart.Longitude)" `
                 -Destination "$($GeoEnd.Latitude),$($GeoEnd.Longitude)" `
                 -Waypoints $GeocodedWaypoints
@@ -522,7 +551,8 @@ if ($PSCmdlet.ParameterSetName -eq 'File') {
                     -Width $MapWidth -Height $MapHeight `
                     -AddressTextA $GeoStart.FormattedAddress -AddressTextB $GeoEnd.FormattedAddress `
                     -DistanceText "$($Trasa.OdlegloscKm) km" -DurationText "$($Trasa.CzasMin) min" `
-                    -HeaderLeftText $RouteName -RouteName $RouteName -HeaderRightText "Typ: $RowRouteType"
+                    -HeaderLeftText $RouteName -RouteName $RouteName -HeaderRightText "Typ: $RowRouteType" `
+                    -Legs $Trasa.Legs
             }
 
             $ResultsList.Add([PSCustomObject]@{

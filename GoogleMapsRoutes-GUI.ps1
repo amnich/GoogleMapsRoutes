@@ -136,7 +136,7 @@ foreach ($n in $ctrlNames) {
 
 $script:OverlayPropKeys = @(
     'StartGeocoded', 'EndGeocoded', 'Distance', 'Duration', 'Timestamp',
-    'RouteName', 'RouteType', 'Waypoints', 'StartRaw', 'EndRaw'
+    'RouteName', 'RouteType', 'Waypoints', 'PointDistances', 'StartRaw', 'EndRaw'
 )
 foreach ($k in $script:OverlayPropKeys) {
     foreach ($pfx in @('chkProp_', 'cmbPanel_', 'cmbAlign_', 'cmbOrder_', 'lblProp_')) {

@@ -403,7 +403,7 @@ function Get-CarRouteData {
     $Headers = @{
         'X-Goog-Api-Key'   = $ApiKey
         'Content-Type'     = 'application/json'
-        'X-Goog-FieldMask' = 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.description,routes.routeLabels'
+        'X-Goog-FieldMask' = 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.description,routes.routeLabels,routes.legs.distanceMeters,routes.legs.duration'
     }
 
     try {
@@ -421,6 +421,7 @@ function Get-CarRouteData {
                 EncodedPolyline = $null
                 RouteType       = $RouteType
                 RouteLabels     = @()
+                Legs            = @()
                 Status          = 'NO_ROUTES'
                 ErrorMessage    = 'Google Routes API did not return any routes.'
             }
@@ -459,6 +460,22 @@ function Get-CarRouteData {
         $Polyline = if ($SelectedRoute.polyline) { $SelectedRoute.polyline.encodedPolyline } else { $null }
         $Labels = if ($SelectedRoute.routeLabels) { @($SelectedRoute.routeLabels) } else { @() }
 
+        $Legs = @()
+        if ($SelectedRoute.legs) {
+            foreach ($leg in $SelectedRoute.legs) {
+                $legDistMeters = if ($leg.distanceMeters) { [int64]$leg.distanceMeters } else { 0 }
+                $legDistKm     = [math]::Round($legDistMeters / 1000.0, 2)
+                $legDurSec     = if ($leg.duration) { [double]($leg.duration.TrimEnd('s')) } else { 0 }
+                $legDurMin     = [math]::Round($legDurSec / 60.0, 1)
+                $Legs += [PSCustomObject]@{
+                    DistanceMeters  = $legDistMeters
+                    DistanceKm      = $legDistKm
+                    DurationSeconds = $legDurSec
+                    DurationMin     = $legDurMin
+                }
+            }
+        }
+
         return [PSCustomObject]@{
             OdlegloscKm     = $DistanceKm
             CzasMin         = $DurationMinutes
@@ -466,6 +483,7 @@ function Get-CarRouteData {
             EncodedPolyline = $Polyline
             RouteType       = $RouteType
             RouteLabels     = $Labels
+            Legs            = $Legs
             AvoidTolls      = [bool]$AvoidTolls
             AvoidHighways   = [bool]$AvoidHighways
             AvoidFerries    = [bool]$AvoidFerries
@@ -483,6 +501,7 @@ function Get-CarRouteData {
             EncodedPolyline = $null
             RouteType       = $RouteType
             RouteLabels     = @()
+            Legs            = @()
             AvoidTolls      = [bool]$AvoidTolls
             AvoidHighways   = [bool]$AvoidHighways
             AvoidFerries    = [bool]$AvoidFerries
@@ -591,6 +610,7 @@ function Save-RouteMapPng {
         [Parameter()][object[]]$WaypointsList = @(),
         [Parameter()][string]$RouteName = '',
         [Parameter()][string]$RouteType = '',
+        [Parameter()][object[]]$Legs = @(),
         [Parameter()][object]$OverlayConfig = $null
     )
 
@@ -647,12 +667,14 @@ function Save-RouteMapPng {
             New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
         }
 
-        $wc = [System.Net.WebClient]::new()
-        try {
-            $wc.DownloadFile($StaticMapUrl, $OutputPath)
-        }
-        finally {
-            $wc.Dispose()
+        if ($ApiKey -ne 'OFFLINE_TEST') {
+            $wc = [System.Net.WebClient]::new()
+            try {
+                $wc.DownloadFile($StaticMapUrl, $OutputPath)
+            }
+            finally {
+                $wc.Dispose()
+            }
         }
 
         # Resolve overlay configuration
@@ -672,6 +694,7 @@ function Save-RouteMapPng {
                     Distance      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Left';   Order = 3 }
                     Duration      = [PSCustomObject]@{ Enabled = $true;  Panel = 'Bottom'; Alignment = 'Center'; Order = 3 }
                     Waypoints     = [PSCustomObject]@{ Enabled = $false; Panel = 'Bottom'; Alignment = 'Left';   Order = 4 }
+                    PointDistances= [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Alignment = 'Left';   Order = 5 }
                     StartRaw      = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Alignment = 'Left';   Order = 1 }
                     EndRaw        = [PSCustomObject]@{ Enabled = $false; Panel = 'None';   Alignment = 'Left';   Order = 2 }
                 }
@@ -681,11 +704,82 @@ function Save-RouteMapPng {
         $enableTop = if ($null -ne $OverlayConfig.EnableTopOverlay) { [bool]$OverlayConfig.EnableTopOverlay } else { $true }
         $enableBtm = if ($null -ne $OverlayConfig.EnableBottomOverlay) { [bool]$OverlayConfig.EnableBottomOverlay } else { $true }
 
+        # Check if PointDistances option is enabled
+        $showPointDistances = $false
+        if ($OverlayConfig) {
+            $ovProps = if ($OverlayConfig.Properties) {
+                $OverlayConfig.Properties
+            } elseif ($OverlayConfig.Items) {
+                $OverlayConfig.Items
+            } else {
+                $null
+            }
+            if ($ovProps) {
+                $pdCfg = if ($ovProps -is [System.Collections.IDictionary]) {
+                    $ovProps['PointDistances']
+                } else {
+                    $ovProps.PointDistances
+                }
+                if ($pdCfg -and $null -ne $pdCfg.Enabled) {
+                    $showPointDistances = [bool]$pdCfg.Enabled
+                }
+            }
+            if (-not $showPointDistances -and $null -ne $OverlayConfig.PointDistances) {
+                $showPointDistances = [bool]$OverlayConfig.PointDistances
+            }
+        }
+
+        # Resolve legs list
+        $legParts = [System.Collections.Generic.List[string]]::new()
+        $legsToUse = if ($Legs -and @($Legs).Count -gt 0) {
+            @($Legs)
+        } elseif ($RoutePoints -and @($RoutePoints).Count -gt 1) {
+            $ptsWithLegs = @($RoutePoints[1..(@($RoutePoints).Count - 1)] | Where-Object { $null -ne $_.LegDistanceKm })
+            if ($ptsWithLegs.Count -gt 0) {
+                $ptsWithLegs | ForEach-Object {
+                    [PSCustomObject]@{
+                        DistanceKm  = $_.LegDistanceKm
+                        DurationMin = if ($null -ne $_.LegDurationMin) { $_.LegDurationMin } else { 0 }
+                    }
+                }
+            } else { @() }
+        } else { @() }
+
+        if ($legsToUse.Count -gt 0) {
+            $totalLegs = $legsToUse.Count
+            for ($k = 0; $k -lt $totalLegs; $k++) {
+                $fromLbl = if ($k -eq 0) { 'A' } else { "$k" }
+                $toLbl   = if ($k -eq ($totalLegs - 1)) { 'B' } else { "$($k + 1)" }
+                $lObj    = $legsToUse[$k]
+                $lDist   = if ($null -ne $lObj.DistanceKm) { $lObj.DistanceKm } else { 0 }
+                $lDur    = if ($null -ne $lObj.DurationMin) { $lObj.DurationMin } else { 0 }
+                $durPart = if ($lDur -gt 0) { " ($lDur min)" } else { "" }
+                $legParts.Add("${fromLbl} → ${toLbl}: ${lDist} km${durPart}")
+            }
+        }
+        $legsPrefix = switch ($lang) { 'de' { 'Etappen: ' } 'pl' { 'Odcinki: ' } default { 'Legs: ' } }
+        $legsText   = ($legParts -join '  |  ')
+
         # Resolve data values
         $addrStartGeo = if ($StartGeocoded) { $StartGeocoded } elseif ($AddressTextA) { $AddressTextA } else { '' }
         $addrStartRaw = if ($StartRaw) { $StartRaw } else { '' }
         $addrEndGeo   = if ($EndGeocoded) { $EndGeocoded } elseif ($AddressTextB) { $AddressTextB } else { '' }
         $addrEndRaw   = if ($EndRaw) { $EndRaw } else { '' }
+
+        # If PointDistances option is enabled, append distance in parentheses to Destination address
+        if ($showPointDistances) {
+            $endLegDist = $null
+            if ($legsToUse -and $legsToUse.Count -gt 0 -and $null -ne $legsToUse[-1].DistanceKm) {
+                $endLegDist = $legsToUse[-1].DistanceKm
+            } elseif ($RoutePoints -and @($RoutePoints).Count -gt 1 -and $null -ne $RoutePoints[-1].LegDistanceKm) {
+                $endLegDist = $RoutePoints[-1].LegDistanceKm
+            }
+            if ($null -ne $endLegDist -and $endLegDist -gt 0) {
+                $endSuffix = " (+${endLegDist} km)"
+                if ($addrEndGeo -and -not $addrEndGeo.EndsWith($endSuffix)) { $addrEndGeo += $endSuffix }
+                if ($addrEndRaw -and -not $addrEndRaw.EndsWith($endSuffix)) { $addrEndRaw += $endSuffix }
+            }
+        }
 
         $nameVal = if ($RouteName) { $RouteName } elseif ($HeaderLeftText) { $HeaderLeftText } elseif ($Description) { $Description.Trim() } elseif ($ContractText) { $ContractText } else { '' }
 
@@ -726,8 +820,25 @@ function Save-RouteMapPng {
             $wText = if ($w -is [string]) { $w }
                      elseif ($w.FormattedAddress) { $w.FormattedAddress }
                      elseif ($w.Address) { $w.Address }
+                     elseif ($w.GeocodedAddress) { $w.GeocodedAddress }
+                     elseif ($w.OriginalAddress) { $w.OriginalAddress }
                      else { '' }
             if (-not [string]::IsNullOrWhiteSpace($wText)) {
+                if ($showPointDistances) {
+                    $wLegDist = $null
+                    $legIdx = $wIdx - 1
+                    if ($legsToUse -and $legIdx -lt $legsToUse.Count -and $null -ne $legsToUse[$legIdx].DistanceKm) {
+                        $wLegDist = $legsToUse[$legIdx].DistanceKm
+                    } elseif ($w -isnot [string] -and $null -ne $w.LegDistanceKm) {
+                        $wLegDist = $w.LegDistanceKm
+                    }
+                    if ($null -ne $wLegDist -and $wLegDist -gt 0) {
+                        $wSuffix = " (+${wLegDist} km)"
+                        if (-not $wText.EndsWith($wSuffix)) {
+                            $wText += $wSuffix
+                        }
+                    }
+                }
                 $wpItems.Add([PSCustomObject]@{
                     Index = $wIdx
                     Badge = "${wIdx}: "
@@ -739,16 +850,17 @@ function Save-RouteMapPng {
 
         # Build active property items map
         $propDataMap = @{
-            'StartGeocoded' = @{ Id='StartGeocoded'; Kind='address'; Badge='A: '; BadgeColor='Green'; Text=$addrStartGeo }
-            'StartRaw'      = @{ Id='StartRaw';      Kind='address'; Badge='A: '; BadgeColor='Green'; Text=$addrStartRaw }
-            'EndGeocoded'   = @{ Id='EndGeocoded';   Kind='address'; Badge='B: '; BadgeColor='Red';   Text=$addrEndGeo }
-            'EndRaw'        = @{ Id='EndRaw';        Kind='address'; Badge='B: '; BadgeColor='Red';   Text=$addrEndRaw }
-            'Distance'      = @{ Id='Distance';      Kind='stat';    Prefix=$distPrefix; Value=$distVal }
-            'Duration'      = @{ Id='Duration';      Kind='stat';    Value=$durVal }
-            'Timestamp'     = @{ Id='Timestamp';     Kind='date';    Text=$dateVal }
-            'RouteName'     = @{ Id='RouteName';     Kind='title';   Text=$nameVal }
-            'RouteType'     = @{ Id='RouteType';     Kind='type';    Text=$typeVal }
-            'Waypoints'     = @{ Id='Waypoints';     Kind='waypoints'; Items=$wpItems }
+            'StartGeocoded'  = @{ Id='StartGeocoded';  Kind='address';        Badge='A: '; BadgeColor='Green'; Text=$addrStartGeo }
+            'StartRaw'       = @{ Id='StartRaw';       Kind='address';        Badge='A: '; BadgeColor='Green'; Text=$addrStartRaw }
+            'EndGeocoded'    = @{ Id='EndGeocoded';    Kind='address';        Badge='B: '; BadgeColor='Red';   Text=$addrEndGeo }
+            'EndRaw'         = @{ Id='EndRaw';         Kind='address';        Badge='B: '; BadgeColor='Red';   Text=$addrEndRaw }
+            'Distance'       = @{ Id='Distance';       Kind='stat';           Prefix=$distPrefix; Value=$distVal }
+            'Duration'       = @{ Id='Duration';       Kind='stat';           Value=$durVal }
+            'Timestamp'      = @{ Id='Timestamp';      Kind='date';           Text=$dateVal }
+            'RouteName'      = @{ Id='RouteName';      Kind='title';          Text=$nameVal }
+            'RouteType'      = @{ Id='RouteType';      Kind='type';           Text=$typeVal }
+            'Waypoints'      = @{ Id='Waypoints';      Kind='waypoints';      Items=$wpItems }
+            'PointDistances' = @{ Id='PointDistances'; Kind='pointdistances'; Badge=$legsPrefix; Text=$legsText }
         }
 
         $topItems = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -901,6 +1013,14 @@ function Save-RouteMapPng {
                                 }
                                 if ($totalWpH -gt $maxH) { $maxH = $totalWpH }
                             }
+                            elseif ($it.Kind -eq 'pointdistances') {
+                                $badgeSz = $measGfx.MeasureString($it.Badge, $FontBadge)
+                                $legMaxW = [float]($availWidth - $badgeSz.Width)
+                                $lines   = @(Get-WrappedLines -G $measGfx -Text $it.Text -F $FontAddr -MaxW $legMaxW)
+                                $it | Add-Member -NotePropertyName 'WrappedLines' -NotePropertyValue $lines -Force
+                                $h = [math]::Max(1, $lines.Count) * $LineH
+                                if ($h -gt $maxH) { $maxH = $h }
+                            }
                             elseif ($it.Kind -eq 'stat') {
                                 if ($maxH -lt 24) { $maxH = 24 }
                             }
@@ -984,6 +1104,11 @@ function Save-RouteMapPng {
                     elseif ($it.Kind -eq 'date') {
                         return $Graphics.MeasureString($it.Text, $FontDate).Width
                     }
+                    elseif ($it.Kind -eq 'pointdistances') {
+                        $bSz = $Graphics.MeasureString($it.Badge, $FontBadge)
+                        $tSz = $Graphics.MeasureString($it.Text, $FontAddr)
+                        return ($bSz.Width + $tSz.Width)
+                    }
                     elseif ($it.Kind -eq 'waypoints') {
                         return 200
                     }
@@ -1014,6 +1139,16 @@ function Save-RouteMapPng {
                                 $Graphics.DrawString($line, $FontAddr, $BrushWhite, ($x + $bSz.Width), $wpY)
                                 $wpY += [float]$LineH
                             }
+                        }
+                    }
+                    elseif ($it.Kind -eq 'pointdistances') {
+                        $Graphics.DrawString($it.Badge, $FontBadge, $BrushCyan, $x, $y)
+                        $bSz = $Graphics.MeasureString($it.Badge, $FontBadge)
+                        $curLineY = $y
+                        $lines = if ($it.WrappedLines) { $it.WrappedLines } else { @($it.Text) }
+                        foreach ($line in $lines) {
+                            $Graphics.DrawString($line, $FontAddr, $BrushYellow, ($x + $bSz.Width), $curLineY)
+                            $curLineY += [float]$LineH
                         }
                     }
                     elseif ($it.Kind -eq 'stat') {
@@ -1494,12 +1629,14 @@ function Export-RouteResults {
         $url       = if ($r.GoogleMapsUrl) { [string]$r.GoogleMapsUrl } else { '' }
 
         # Build waypoints summary text
+        $pts = if ($r.RoutePoints) { $r.RoutePoints } elseif ($r.Points) { $r.Points } else { $null }
         $wpSummaryList = [System.Collections.Generic.List[string]]::new()
-        if ($r.Points -and ($r.Points -is [System.Collections.IEnumerable])) {
-            foreach ($pt in $r.Points) {
+        if ($pts -and ($pts -is [System.Collections.IEnumerable])) {
+            foreach ($pt in $pts) {
                 if ($pt.PointType -like 'Waypoint*') {
                     $ptSummary = "$($pt.PointType): '$($pt.OriginalAddress)'"
                     if ($pt.GeocodedAddress) { $ptSummary += " -> '$($pt.GeocodedAddress)'" }
+                    if ($null -ne $pt.LegDistanceKm -and $pt.LegDistanceKm -gt 0) { $ptSummary += " ($($pt.LegDistanceKm) km)" }
                     if ($pt.GeocodeStatus) { $ptSummary += " [$($pt.GeocodeStatus)]" }
                     $wpSummaryList.Add($ptSummary)
                 }
@@ -1509,6 +1646,8 @@ function Export-RouteResults {
                     RouteName       = $routeName
                     PointOrder      = $pt.Order
                     PointType       = $pt.PointType
+                    LegDistanceKm   = if ($null -ne $pt.LegDistanceKm) { $pt.LegDistanceKm } else { $null }
+                    LegDurationMin  = if ($null -ne $pt.LegDurationMin) { $pt.LegDurationMin } else { $null }
                     OriginalAddress = $pt.OriginalAddress
                     GeocodedAddress = $pt.GeocodedAddress
                     GeocodeStatus   = $pt.GeocodeStatus
